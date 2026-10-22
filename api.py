@@ -1,18 +1,21 @@
-from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from typing import Literal
+from statistics import median
+
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from ai_advisor import get_smart_advice
-from src.database_w_input import get_supplier_recommendations
+
 
 app = FastAPI(
     title="SME Supplier Recommendation API",
-    description="Supplier validation and Gemini AI advice",
-    version="1.0.0"
+    description="Supplier validation, anomaly detection and Gemini AI advice",
+    version="1.1.0"
 )
 
-# 1. Request data models
+
+# 1. Request models
 
 class Supplier(BaseModel):
     name: str = Field(min_length=1)
@@ -21,7 +24,7 @@ class Supplier(BaseModel):
     delivery_days: float = Field(ge=0)
     distance_km: float = Field(ge=0)
 
-    # Optional fields for anomaly detection
+    # Optional reported total for consistency checking
     total_cost_rm: float | None = Field(default=None, ge=0)
     route_status: str = "OK"
     score: float | None = None
@@ -48,18 +51,21 @@ def home():
         "message": "Supplier Recommendation API is ready"
     }
 
-# 3. Supplier anomaly detection
+
+# 3. Anomaly detection
+
 def detect_anomalies(suppliers):
     warnings = []
 
     for supplier in suppliers:
         name = supplier.name
 
-        calculated_total = (
-            supplier.product_price_rm + supplier.shipping_rm
+        calculated_total = round(
+            supplier.product_price_rm + supplier.shipping_rm,
+            2
         )
 
-        # Check total cost consistency
+        # Rule 1: Check reported total cost
         if supplier.total_cost_rm is not None:
             if abs(
                 supplier.total_cost_rm - calculated_total
@@ -67,91 +73,135 @@ def detect_anomalies(suppliers):
                 warnings.append({
                     "supplier": name,
                     "type": "TOTAL_COST_MISMATCH",
+                    "severity": "high",
                     "message": (
-                        "Reported total cost does not match "
-                        "product price plus shipping."
+                        f"Reported total RM"
+                        f"{supplier.total_cost_rm:.2f} does not match "
+                        f"product price plus shipping "
+                        f"(RM{calculated_total:.2f})."
                     )
                 })
 
-        # Check route calculation status
-        if supplier.route_status.upper() != "OK":
+        # Rule 2: Check route status
+        if supplier.route_status.strip().upper() != "OK":
             warnings.append({
                 "supplier": name,
                 "type": "INVALID_ROUTE",
+                "severity": "high",
                 "message": (
-                    f"Route status is {supplier.route_status}."
+                    f"Route status is "
+                    f"{supplier.route_status}. Verify the route."
                 )
             })
 
-    # Compare suppliers to find unusual prices.
-    # This is a simple heuristic, not proof of an error.
-    valid_prices = [
+    # Rule 3: Compare product prices using the median
+    prices = [
         s.product_price_rm
         for s in suppliers
         if s.product_price_rm > 0
     ]
 
-    if len(valid_prices) >= 3:
-        average_price = sum(valid_prices) / len(valid_prices)
+    if len(prices) >= 3:
+        reference_price = median(prices)
 
         for supplier in suppliers:
             if (
                 supplier.product_price_rm > 0
-                and supplier.product_price_rm > average_price * 2
+                and supplier.product_price_rm > reference_price * 2
             ):
                 warnings.append({
                     "supplier": supplier.name,
                     "type": "UNUSUALLY_HIGH_PRICE",
+                    "severity": "medium",
                     "message": (
                         "Product price is more than twice "
-                        "the average positive supplier price. "
-                        "Please verify the data."
+                        "the median positive supplier price. "
+                        "Please verify the quote."
+                    )
+                })
+
+    # Rule 4: Compare shipping fees using the median
+    fees = [
+        s.shipping_rm
+        for s in suppliers
+        if s.shipping_rm > 0
+    ]
+
+    if len(fees) >= 3:
+        reference_fee = median(fees)
+
+        for supplier in suppliers:
+            if (
+                supplier.shipping_rm > 0
+                and supplier.shipping_rm > reference_fee * 2
+            ):
+                warnings.append({
+                    "supplier": supplier.name,
+                    "type": "UNUSUALLY_HIGH_SHIPPING",
+                    "severity": "medium",
+                    "message": (
+                        "Shipping fee is more than twice "
+                        "the median positive shipping fee. "
+                        "Please verify the delivery quote."
                     )
                 })
 
     return warnings
 
-# 4. Main API: Supplier + AI advice
+
+# 4. Main supplier advice API
+
 @app.post("/supplier-advice")
 def supplier_advice(request: AdviceRequest):
-
     suppliers = request.suppliers
 
-    # Calculate the total cost using trusted input fields.
+    # Detect anomalies using the original reported input.
+    warnings = detect_anomalies(suppliers)
+
     supplier_results = []
 
     for supplier in suppliers:
         item = supplier.model_dump()
 
-        item["total_cost_rm"] = round(
+        # Calculate total cost from the price and shipping fields.
+        calculated_total = round(
             supplier.product_price_rm + supplier.shipping_rm,
             2
         )
 
+        item["reported_total_cost_rm"] = supplier.total_cost_rm
+        item["total_cost_rm"] = calculated_total
+
         item["within_budget"] = (
-            item["total_cost_rm"] <= request.budget
+            calculated_total <= request.budget
         )
 
         item["meets_delivery_requirement"] = (
             supplier.delivery_days <= request.max_delivery_days
         )
 
+        # Make the detected warnings visible for each supplier.
+        item["anomalies"] = [
+            warning for warning in warnings
+            if warning["supplier"] == supplier.name
+        ]
+
         supplier_results.append(item)
 
-    # Detect suspicious or inconsistent data.
-    warnings = detect_anomalies(suppliers)
-
-    # Exclude suppliers with invalid route status from AI ranking.
+    # Do not recommend suppliers with invalid routes.
     ai_suppliers = [
         {
             "name": s.name,
             "product_price_rm": s.product_price_rm,
             "shipping_rm": s.shipping_rm,
+            "total_cost_rm": round(
+                s.product_price_rm + s.shipping_rm, 2
+            ),
             "delivery_days": s.delivery_days,
             "distance_km": s.distance_km
         }
         for s in suppliers
-        if s.route_status.upper() == "OK"
+        if s.route_status.strip().upper() == "OK"
     ]
 
     advice = None
@@ -163,17 +213,24 @@ def supplier_advice(request: AdviceRequest):
                 suppliers=ai_suppliers,
                 budget=request.budget,
                 max_delivery_days=request.max_delivery_days,
-                priority=request.priority
+                priority=request.priority,
+                warnings=warnings
             )
             ai_status = "success"
 
-        except Exception:
-            # Do not expose API keys or internal error details.
+        except Exception as exc:
+            # Keep the API working if Gemini is unavailable.
+            print(
+                "Gemini advice failed:",
+                type(exc).__name__,
+                str(exc)
+            )
+
             ai_status = "failed"
             advice = (
                 "AI advice is temporarily unavailable. "
-                "Please use the supplier data and warnings "
-                "while the API issue is investigated."
+                "Supplier results and anomaly warnings "
+                "are still available."
             )
 
     return {

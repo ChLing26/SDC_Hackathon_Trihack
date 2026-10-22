@@ -16,14 +16,15 @@ API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 # Create the client only when a key is available.
 client = genai.Client(api_key=API_KEY) if API_KEY else None
 
-MODEL_NAME = "gemini-flash-latest"
+MODEL_NAME = "gemini-3.8-flash"
 
 # 2. Smart Supplier Recommendation
 def get_smart_advice(
     suppliers,
     budget,
     max_delivery_days,
-    priority="balanced"
+    priority="balanced",
+    warnings=None
 ):
 
     if not isinstance(suppliers, list) or not suppliers:
@@ -106,36 +107,51 @@ def get_smart_advice(
         and supplier["meets_delivery_requirement"]
     ]
 
+    warnings = warnings or []
+
     prompt = f"""
-You are an intelligent procurement advisor for SMEs in Malaysia.
+    You are an intelligent procurement advisor for SMEs in Malaysia.
 
-BUYER REQUIREMENTS
-Maximum total budget: RM {budget:.2f}
-Maximum delivery time: {max_delivery_days} days
-Priority: {priority}
+    BUYER REQUIREMENTS
+    Maximum total budget: RM {budget:.2f}
+    Maximum delivery time: {max_delivery_days} days
+    Priority: {priority}
 
-SUPPLIER DATA
-{processed_suppliers}
+    SUPPLIER DATA
+    {processed_suppliers}
 
-SUPPLIERS MEETING BOTH BUDGET AND DELIVERY REQUIREMENTS
-{eligible_suppliers}
+    SUPPLIERS MEETING BOTH BUDGET AND DELIVERY REQUIREMENTS
+    {eligible_suppliers}
 
-YOUR TASK
-1. Recommend the most suitable eligible supplier.
-2. Explain the reasons for your recommendation.
-3. Compare total cost, delivery time, and road distance.
-4. If no supplier meets both requirements, state this clearly.
-5. If priority is lowest_cost, emphasize total cost.
-6. If priority is fastest_delivery, emphasize delivery time.
-7. If priority is balanced, consider all supplied factors.
-8. Use only the supplied data. Do not invent facts.
-9. Explain trade-offs and write concise, professional English.
+    PYTHON ANOMALY DETECTION WARNINGS
+    {warnings}
 
-IMPORTANT
-Total cost = product price + shipping fee
-Do not assume a shorter road distance guarantees lower shipping cost.
-Do not claim that an ineligible supplier meets the requirements.
-"""
+    YOUR TASK
+    1. Recommend the most suitable eligible supplier, if one can be
+       recommended safely based on the available data.
+    2. Explain the reasons for your recommendation.
+    3. Compare total cost, delivery time, and road distance.
+    4. If no supplier meets both requirements, state this clearly.
+    5. If priority is lowest_cost, emphasize total cost.
+    6. If priority is fastest_delivery, emphasize delivery time.
+    7. If priority is balanced, consider all supplied factors.
+    8. Use only the supplied data. Do not invent facts.
+    9. Explain trade-offs and write concise, professional English.
+    10. Explain any relevant anomaly warnings and their potential risks.
+    11. A supplier with a TOTAL_COST_MISMATCH warning has an
+        unverified reported total. Do not treat that reported total
+        as reliable until it is checked.
+    12. If a material pricing anomaly could change the recommendation,
+        explain that the quote should be verified before purchase.
+    13. Distinguish a warning from a confirmed error. An unusually
+        high shipping fee is not automatically proof of fraud or error.
+
+    IMPORTANT
+    Total cost = product price + shipping fee.
+    Do not assume a shorter road distance guarantees lower shipping cost.
+    Do not claim that an ineligible supplier meets the requirements.
+    Python warnings are validation signals and must not be ignored.
+    """
 
     try:
         if client is None:
