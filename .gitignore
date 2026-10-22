@@ -1,5 +1,13 @@
-.env
-.venv/
-venv/
+# Python
 __pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Environment
+.env
+
+# OS / Editor
+.DS_Store
+.vscode/
 .idea/
