@@ -1,4 +1,3 @@
-
 from typing import Literal
 from statistics import median
 
