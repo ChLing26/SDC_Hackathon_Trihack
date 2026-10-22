@@ -1,32 +1,22 @@
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 from google import genai
 
-# Load Gemini API Key
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
 
-load_dotenv(dotenv_path=ENV_PATH, override=True)
+# Load local .env if available.
+# Existing environment variables, such as Replit Secrets,
+# take priority over values in .env.
+load_dotenv(dotenv_path=ENV_PATH, override=False)
 
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-if not API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. "
-        "Please check your .env file."
-    )
-
-print("Gemini API key loaded successfully.")
-
-# Pass the API key explicitly to avoid relying on
-# automatic environment-variable discovery.
-client = genai.Client(api_key=API_KEY)
+# Create the client only when a key is available.
+client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 MODEL_NAME = "gemini-flash-latest"
-
-
 
 # 2. Smart Supplier Recommendation
 def get_smart_advice(
@@ -148,6 +138,12 @@ Do not claim that an ineligible supplier meets the requirements.
 """
 
     try:
+        if client is None:
+            return (
+                "AI advice is unavailable because "
+                "GEMINI_API_KEY is not configured."
+            )
+
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt

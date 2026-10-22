@@ -1,11 +1,10 @@
-
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from ai_advisor import get_smart_advice
-
+from src.database_w_input import get_supplier_recommendations
 
 app = FastAPI(
     title="SME Supplier Recommendation API",
@@ -13,10 +12,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
-# ==========================================
 # 1. Request data models
-# ==========================================
 
 class Supplier(BaseModel):
     name: str = Field(min_length=1)
@@ -43,9 +39,7 @@ class AdviceRequest(BaseModel):
     ] = "balanced"
 
 
-# ==========================================
 # 2. Health check
-# ==========================================
 
 @app.get("/")
 def home():
@@ -54,11 +48,7 @@ def home():
         "message": "Supplier Recommendation API is ready"
     }
 
-
-# ==========================================
 # 3. Supplier anomaly detection
-# ==========================================
-
 def detect_anomalies(suppliers):
     warnings = []
 
@@ -121,11 +111,7 @@ def detect_anomalies(suppliers):
 
     return warnings
 
-
-# ==========================================
 # 4. Main API: Supplier + AI advice
-# ==========================================
-
 @app.post("/supplier-advice")
 def supplier_advice(request: AdviceRequest):
 

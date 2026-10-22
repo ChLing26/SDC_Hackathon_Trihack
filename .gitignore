@@ -1,5 +1,18 @@
-.env
+
+# Python virtual environment
 .venv/
 venv/
+env/
+
+# API keys and local secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
 __pycache__/
+*.py[cod]
+
 .idea/
+
+
