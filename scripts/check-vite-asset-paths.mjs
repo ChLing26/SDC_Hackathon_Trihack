@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const apps = [
   {
@@ -14,8 +15,8 @@ const apps = [
   },
 ];
 
-function readManifestPaths(manifestPath) {
-  const manifest = readFileSync(resolve(manifestPath), "utf8");
+function readManifestPaths(manifestPath, cwd = process.cwd()) {
+  const manifest = readFileSync(resolve(cwd, manifestPath), "utf8");
   let section = "";
   let previewPath;
   let configuredBasePath;
@@ -61,12 +62,17 @@ function readManifestPaths(manifestPath) {
   return { basePath, assetPrefix: `${basePath}assets/` };
 }
 
-function checkAssetPaths(app) {
-  const { basePath, assetPrefix } = readManifestPaths(app.manifestPath);
+export function checkAssetPaths(app, {
+  cwd = process.cwd(),
+  log = console.log,
+} = {}) {
+  const { basePath, assetPrefix } = readManifestPaths(app.manifestPath, cwd);
+  const indexPath = resolve(cwd, app.indexPath);
+  const outputDirectory = dirname(indexPath);
   let html;
 
   try {
-    html = readFileSync(resolve(app.indexPath), "utf8");
+    html = readFileSync(indexPath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(
@@ -100,9 +106,48 @@ function checkAssetPaths(app) {
     );
   }
 
-  console.log(`${app.name} assets use configured prefix "${assetPrefix}".`);
+  const missingReferences = [];
+  for (const url of references) {
+    let assetPath;
+    try {
+      const pathname = new URL(url, "http://preview.local").pathname;
+      const decodedPath = decodeURIComponent(pathname);
+      assetPath = resolve(outputDirectory, decodedPath.slice(basePath.length));
+    } catch {
+      missingReferences.push(url);
+      continue;
+    }
+
+    const relativePath = relative(outputDirectory, assetPath);
+    const escapesOutputDirectory =
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      resolve(outputDirectory, relativePath) !== assetPath;
+
+    if (
+      escapesOutputDirectory ||
+      !existsSync(assetPath) ||
+      !statSync(assetPath).isFile()
+    ) {
+      missingReferences.push(url);
+    }
+  }
+
+  if (missingReferences.length > 0) {
+    throw new Error(
+      `${app.name} build output is missing file${missingReferences.length === 1 ? "" : "s"} referenced by URL${missingReferences.length === 1 ? "" : "s"}: ${missingReferences.map((url) => `"${url}"`).join(", ")}`,
+    );
+  }
+
+  log(`${app.name} assets use configured prefix "${assetPrefix}" and exist in the build output.`);
 }
 
-for (const app of apps) {
-  checkAssetPaths(app);
+export function checkAllAssetPaths({ appConfigs = apps, cwd, log } = {}) {
+  for (const app of appConfigs) {
+    checkAssetPaths(app, { cwd, log });
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  checkAllAssetPaths();
 }
