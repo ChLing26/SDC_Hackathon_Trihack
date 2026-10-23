@@ -560,6 +560,25 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("resolves escaped punctuation and non-ASCII filenames in CSS", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./hero\\(dark\\).webp")} @font-face{src:url("./caf\\e9 .woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "hero(dark).webp"), "");
+    writeFileSync(join(assetsDirectory, "café.woff2"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("reports the app and authored escaped URL when a CSS-escaped asset is missing", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",
@@ -584,6 +603,36 @@ describe("Vite preview asset paths", () => {
         assert.match(
           error.message,
           /"\.\/missing\\20 image\.webp" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports missing escaped punctuation and non-ASCII assets with their authored URLs and stylesheet", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./missing\\(dark\\).webp")} @font-face{src:url("./missing-caf\\e9 .woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\.\/missing\\\(dark\\\)\.webp" in assets\/styles\.css/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/missing-caf\\e9 \.woff2" in assets\/styles\.css/,
         );
         return true;
       },
