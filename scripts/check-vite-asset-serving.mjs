@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { apps, readPreviewSettings } from "./build-vite-apps.mjs";
@@ -59,18 +59,63 @@ function expectedAssetPaths(html) {
   return paths;
 }
 
-function assertResponse(response, type, requestUrl, appName) {
+function collectLazyChunkReferences(outputDirectory) {
+  const references = [];
+  const pendingDirectories = [outputDirectory];
+  const dynamicImportPattern = /\bimport\s*\(\s*(["'\x60])([^"'\x60]+)\1\s*\)/g;
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+        continue;
+      }
+
+      if (!entry.isFile() || !/\.(?:m?js)$/i.test(entry.name)) continue;
+
+      const source = relative(outputDirectory, entryPath).split(sep).join("/");
+      const content = readFileSync(entryPath, "utf8");
+      for (const match of content.matchAll(dynamicImportPattern)) {
+        const specifier = match[2];
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(specifier)) continue;
+        let pathname;
+        try {
+          pathname = new URL(specifier, "http://preview.local/").pathname;
+        } catch {
+          continue;
+        }
+        if (!/\.(?:m?js)$/i.test(pathname)) continue;
+        references.push({ source, specifier });
+      }
+    }
+  }
+
+  return references;
+}
+
+function assertResponse(
+  response,
+  type,
+  requestUrl,
+  appName,
+  requestLabel = assetTypes[type].label,
+) {
   const definition = assetTypes[type];
   if (!response.ok) {
     throw new Error(
-      `${appName} ${definition.label} request ${requestUrl} returned HTTP ${response.status}.`,
+      `${appName} ${requestLabel} request ${requestUrl} returned HTTP ${response.status}.`,
     );
   }
 
-  const contentType = response.headers.get("content-type")?.split(";")[0].trim();
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim();
   if (!contentType || !definition.contentType.test(contentType)) {
     throw new Error(
-      `${appName} ${definition.label} request ${requestUrl} returned content type "${contentType ?? "missing"}" instead of an expected ${definition.label} type.`,
+      `${appName} ${requestLabel} request ${requestUrl} returned content type "${contentType ?? "missing"}" instead of an expected ${definition.label} type.`,
     );
   }
 }
@@ -91,7 +136,10 @@ async function readPage(fetchImpl, pageUrl, appName) {
     );
   }
 
-  const contentType = response.headers.get("content-type")?.split(";")[0].trim();
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim();
   if (contentType !== "text/html") {
     throw new Error(
       `${appName} page request ${pageUrl} returned content type "${contentType ?? "missing"}" instead of text/html.`,
@@ -224,6 +272,7 @@ export async function checkServedAssets(
   const rootPageUrl = new URL(normalizedBasePath, origin).href;
   const nestedPath = `${normalizedBasePath}__asset-check__/nested/`;
   const nestedPageUrl = new URL(nestedPath, origin).href;
+  const outputDirectory = dirname(indexPath);
 
   // Load both pages before using their URLs, matching a hard refresh from a
   // nested client-side route rather than relying only on build-time URLs.
@@ -260,8 +309,43 @@ export async function checkServedAssets(
     assertResponse(response, type, resolvedAssetUrl.href, app.name);
   }
 
+  const lazyChunkUrls = new Set();
+  for (const { source, specifier } of collectLazyChunkReferences(
+    outputDirectory,
+  )) {
+    const sourceUrl = new URL(source, new URL(normalizedBasePath, origin));
+    const chunkUrl = new URL(specifier, sourceUrl);
+    if (
+      chunkUrl.origin !== new URL(origin).origin ||
+      !chunkUrl.pathname.startsWith(normalizedBasePath)
+    ) {
+      throw new Error(
+        `${app.name} lazy-loaded JavaScript chunk URL "${specifier}" from "${source}" does not resolve beneath configured preview path "${normalizedBasePath}".`,
+      );
+    }
+    lazyChunkUrls.add(chunkUrl.href);
+  }
+
+  for (const chunkUrl of lazyChunkUrls) {
+    let response;
+    try {
+      response = await fetchImpl(chunkUrl);
+    } catch (error) {
+      throw new Error(
+        `${app.name} lazy-loaded JavaScript chunk request ${chunkUrl} failed: ${error.message}`,
+      );
+    }
+    assertResponse(
+      response,
+      "js",
+      chunkUrl,
+      app.name,
+      "lazy-loaded JavaScript chunk",
+    );
+  }
+
   log(
-    `${app.name} served JavaScript, CSS, and media successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
+    `${app.name} served JavaScript, CSS, media, and ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
   );
 }
 
@@ -313,7 +397,10 @@ export async function checkAllServedAssets({
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   checkAllServedAssets().catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

@@ -11,13 +11,21 @@ after(() => rmSync(tempRoot, { recursive: true, force: true }));
 
 function makeBuiltApp() {
   const outputDirectory = join(tempRoot, "dist");
-  mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+  mkdirSync(join(outputDirectory, "assets", "features"), { recursive: true });
   const indexPath = join(outputDirectory, "index.html");
   writeFileSync(
     indexPath,
     `<script type="module" src="/__mockup/assets/app.js"></script>
 <link rel="stylesheet" href="/__mockup/assets/app.css">
 <link rel="icon" href="/__mockup/assets/icon.svg">`,
+  );
+  writeFileSync(
+    join(outputDirectory, "assets", "app.js"),
+    'import("./features/lazy-feature.js");',
+  );
+  writeFileSync(
+    join(outputDirectory, "assets", "features", "lazy-feature.js"),
+    "export {};",
   );
 
   return {
@@ -41,12 +49,17 @@ describe("served Vite asset paths", () => {
     const fetchImpl = async (input) => {
       const url = new URL(input);
       requests.push(url.pathname);
-      if (url.pathname === "/__mockup/" || url.pathname === "/__mockup/__asset-check__/nested/") {
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
         return response("<div id='root'></div>", "text/html", 200, url.href);
       }
-      if (url.pathname.endsWith(".js")) return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
       if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
-      if (url.pathname.endsWith(".svg")) return response("<svg/>", "image/svg+xml");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
       return response("missing", "text/html", 404);
     };
 
@@ -66,7 +79,62 @@ describe("served Vite asset paths", () => {
       "/__mockup/assets/app.js",
       "/__mockup/assets/app.css",
       "/__mockup/assets/icon.svg",
+      "/__mockup/assets/features/lazy-feature.js",
     ]);
+  });
+
+  it("rejects app-shell HTML returned instead of a lazy-loaded JavaScript chunk", async () => {
+    const app = makeBuiltApp();
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/__mockup/assets/features/lazy-feature.js") {
+        return response("<html>app shell</html>", "text/html");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas lazy-loaded JavaScript chunk request .* returned content type "text\/html"/,
+    );
+  });
+
+  it("fails when a lazy-loaded JavaScript chunk request returns an error", async () => {
+    const app = makeBuiltApp();
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/__mockup/assets/features/lazy-feature.js") {
+        return response("missing", "text/plain", 404);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas lazy-loaded JavaScript chunk request .* returned HTTP 404/,
+    );
   });
 
   it("rejects app-shell HTML returned instead of an image", async () => {
@@ -76,7 +144,8 @@ describe("served Vite asset paths", () => {
       if (url.pathname.endsWith(".svg")) {
         return response("<html>app shell</html>", "text/html");
       }
-      if (url.pathname.endsWith(".js")) return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
       if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
       return response("<div id='root'></div>", "text/html", 200, url.href);
     };
@@ -126,9 +195,11 @@ describe("served Vite asset paths", () => {
     );
     const fetchImpl = async (input) => {
       const url = new URL(input);
-      if (url.pathname.endsWith(".js")) return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
       if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
-      if (url.pathname.endsWith(".svg")) return response("<svg/>", "image/svg+xml");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
       return response("<div id='root'></div>", "text/html", 200, url.href);
     };
 
