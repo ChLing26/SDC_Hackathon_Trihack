@@ -42,6 +42,18 @@ _Populate as you build — short repo map plus pointers to the source-of-truth f
 
 - Configure provider credentials through Replit project environment settings. ProcureFlow does not store provider keys in its database or provide an app-managed key vault.
 
+## Private supplier advice (Phase A)
+
+- Run the separate **Private Python Advice** console workflow: `python -m src.main --service advice --port 8000`. It binds only to loopback; do not add a public artifact route or a `waitForPort` public-port readiness check.
+- Configure `PYTHON_BACKEND_TOKEN` in Replit Secrets (at least 32 characters). Express and Python read it at runtime; never use a `VITE_` variable or send it to the browser. `GEMINI_API_KEY` enables optional Gemini advice.
+- `POST /api/procurement/requests/:requestId/advice` requires the existing account session and same-origin mutation header. Body: `{}` or `{ "priority": "balanced" | "lowest_cost" | "fastest_delivery" }`; all other fields are rejected.
+- Express loads the stored PostgreSQL record, derives subtotal from unit price × quantity, and sends shipping separately to the fixed private endpoint. Advice is transient, MYR-only, and based on illustrative offers. No advice is written to PostgreSQL or SQLite.
+- Delivery checks use the existing illustrative scoring basis: ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date. An elapsed deadline is always shown as ineligible. This is not a real fulfillment promise or live route verification.
+- The adapter has a 20-second total deadline, bounded responses, redirect refusal, schema/quote consistency checks, and sanitized failures. Gemini failures returned by Python preserve deterministic eligibility and anomalies. A service-level timeout/unavailability is reported explicitly rather than simulated as success.
+- Existing approvals, signatures, invoice persistence and OpenAI approval-history recommendations are unchanged. Do not activate SQLite emergency-order mutations.
+- Safe no-project-DB checks: `pnpm --filter @workspace/api-server run test:advice`, `pnpm --filter @workspace/procurement-workspace test`, `python -m unittest discover -s tests -p 'test_backend_*.py'`, `pnpm run typecheck`. Python tests use temporary SQLite fixtures and mocked providers.
+- The general API/bootstrap tests and `scripts/post-merge.sh` can mutate a database. Do not run them against the project database during no-data-change reviews; this Phase A check does not run migration scripts.
+
 ## Product
 
 _Describe the high-level user-facing capabilities of this app once they exist._

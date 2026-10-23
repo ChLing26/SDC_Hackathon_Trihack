@@ -26,6 +26,8 @@ import type {
   AuthErrorResponse,
   HealthStatus,
   InvoiceSignatureInput,
+  ProcurementAdvice,
+  ProcurementAdviceInput,
   ProcurementDashboard,
   ProcurementDecisionInput,
   ProcurementInvoice,
@@ -761,6 +763,95 @@ export function useGetProcurementRequest<TData = Awaited<ReturnType<typeof getPr
 
 
 
+
+export const getGetProcurementAdviceUrl = (requestId: number,) => {
+
+
+
+
+  return `/api/procurement/requests/${requestId}/advice`
+}
+
+/**
+ * @summary Validate stored illustrative offers and request private Python advice
+ */
+export const getProcurementAdvice = async (requestId: number,
+    procurementAdviceInput: ProcurementAdviceInput, options?: Parameters<typeof customFetch>[1]): Promise<ProcurementAdvice> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ProcurementAdvice>(getGetProcurementAdviceUrl(requestId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(procurementAdviceInput)
+  }
+);}
+
+
+
+
+
+export const getGetProcurementAdviceMutationKey = () => ['getProcurementAdvice'] as const;
+
+export const getGetProcurementAdviceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getProcurementAdvice>>, TError,GetProcurementAdviceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getProcurementAdvice>>, TError,GetProcurementAdviceMutationVariables, TContext> => {
+
+const mutationKey = getGetProcurementAdviceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getProcurementAdvice>>, GetProcurementAdviceMutationVariables> = (props) => {
+          const {requestId,data} = props ?? {};
+
+          return  getProcurementAdvice(requestId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetProcurementAdviceMutationResult = NonNullable<Awaited<ReturnType<typeof getProcurementAdvice>>>
+    export type GetProcurementAdviceMutationBody = BodyType<ProcurementAdviceInput>
+    export type GetProcurementAdviceMutationError = ErrorType<void>
+    export type GetProcurementAdviceMutationVariables = {requestId: number;data: BodyType<ProcurementAdviceInput>}
+
+    /**
+ * @summary Validate stored illustrative offers and request private Python advice
+ */
+export const useGetProcurementAdvice = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getProcurementAdvice>>, TError,GetProcurementAdviceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getProcurementAdvice>>,
+        TError,
+        GetProcurementAdviceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getGetProcurementAdviceMutationOptions(options));
+    }
 
 export const getDecideProcurementRequestUrl = (requestId: number,) => {
 

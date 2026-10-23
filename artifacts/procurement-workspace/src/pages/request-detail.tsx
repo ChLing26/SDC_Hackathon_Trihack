@@ -16,6 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { ErrorBox, Empty, StatusTag, money, fdate } from "@/components/shell";
 import { cn } from "@/lib/utils";
+import { RequestAdvice } from "@/components/request-advice";
 
 type SortKey = "score" | "price" | "distance";
 const SUBS: [keyof ProcurementOffer, string][] = [["priceScore", "Price"], ["speedScore", "Speed"], ["proximityScore", "Proximity"], ["reliabilityScore", "Reliability"]];
@@ -130,6 +131,8 @@ export default function RequestDetail() {
                 );
               })}
             </div>}
+          <RequestAdvice requestId={r.id} currency={r.currency}
+            key={JSON.stringify([r.id, r.quantity, r.budgetAmount, r.currency, r.requiredDeliveryDate, r.offers])} />
         </section>
 
         <aside className="lg:sticky lg:top-6 self-start rounded-md border bg-card p-5">

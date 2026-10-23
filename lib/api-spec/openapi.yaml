@@ -154,6 +154,43 @@ paths:
                 $ref: "#/components/schemas/ProcurementRequestDetail"
         "404":
           description: Request not found
+  /procurement/requests/{requestId}/advice:
+    post:
+      operationId: getProcurementAdvice
+      tags: [procurement]
+      summary: Validate stored illustrative offers and request private Python advice
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcurementAdviceInput"
+      responses:
+        "200":
+          description: Transient advice; no procurement data is modified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementAdvice"
+        "400":
+          description: Invalid request; authoritative offer fields are not accepted
+        "401":
+          description: Sign-in required
+        "404":
+          description: Request not found
+        "422":
+          description: Stored offers cannot be advised on, including non-MYR currency
+        "502":
+          description: Invalid private service response
+        "503":
+          description: Private service unavailable or not configured
+        "504":
+          description: Private service timed out
   /procurement/requests/{requestId}/decision:
     post:
       operationId: decideProcurementRequest
@@ -307,6 +344,62 @@ components:
           type: string
       required:
         - status
+    ProcurementAdviceInput:
+      type: object
+      additionalProperties: false
+      properties:
+        priority:
+          type: string
+          enum: [balanced, lowest_cost, fastest_delivery]
+          default: balanced
+    ProcurementAdviceWarning:
+      type: object
+      required: [offerId, type, severity, message]
+      properties:
+        offerId: { type: integer, minimum: 1 }
+        type:
+          type: string
+          enum: [TOTAL_COST_MISMATCH, INVALID_ROUTE, UNUSUALLY_HIGH_PRICE, UNUSUALLY_HIGH_SHIPPING]
+        severity: { type: string, enum: [high, medium] }
+        message: { type: string, maxLength: 2000 }
+    ProcurementAdviceSupplier:
+      type: object
+      required: [offerId, supplierName, productSubtotal, shippingFee, totalPrice, currency, deliveryDays, distanceKm, withinBudget, meetsDeliveryRequirement, anomalies]
+      properties:
+        offerId: { type: integer, minimum: 1 }
+        supplierName: { type: string }
+        productSubtotal: { type: number, minimum: 0 }
+        shippingFee: { type: number, minimum: 0 }
+        totalPrice: { type: number, minimum: 0 }
+        currency: { type: string, enum: [MYR] }
+        deliveryDays: { type: number, minimum: 0 }
+        distanceKm: { type: number, minimum: 0 }
+        withinBudget: { type: boolean }
+        meetsDeliveryRequirement: { type: boolean }
+        anomalies:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
+    ProcurementAdvice:
+      type: object
+      required: [requestId, generatedAt, source, maxDeliveryDays, deadlinePassed, deadlinePolicy, aiStatus, advice, suppliers, warnings]
+      properties:
+        requestId: { type: integer, minimum: 1 }
+        generatedAt: { type: string, format: date-time }
+        source: { type: string, enum: [illustrative_offers] }
+        maxDeliveryDays: { type: integer, minimum: 0 }
+        deadlinePassed: { type: boolean }
+        deadlinePolicy:
+          type: string
+          description: Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.
+          enum: [stored_date_utc_midnight]
+        aiStatus: { type: string, enum: [success, unavailable, failed, skipped] }
+        advice: { type: [string, "null"], maxLength: 20000 }
+        suppliers:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceSupplier" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
     ProcurementRequestInput:
       type: object
       required: [itemName, quantity, budgetAmount, currency, requiredDeliveryDate, deliveryLocation, requesterName]

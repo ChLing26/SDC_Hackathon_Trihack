@@ -288,6 +288,82 @@ export const GetProcurementRequestResponse = zod.object({
 
 
 /**
+ * @summary Validate stored illustrative offers and request private Python advice
+ */
+
+
+
+export const GetProcurementAdviceParams = zod.object({
+  "requestId": zod.coerce.number().int().min(1)
+})
+
+export const getProcurementAdviceBodyPriorityDefault = `balanced`;
+
+export const GetProcurementAdviceBody = zod.object({
+  "priority": zod.enum(['balanced', 'lowest_cost', 'fastest_delivery']).default(getProcurementAdviceBodyPriorityDefault)
+})
+
+
+export const getProcurementAdviceResponseMaxDeliveryDaysMin = 0;
+
+export const getProcurementAdviceResponseAdviceMax = 20000;
+
+
+export const getProcurementAdviceResponseSuppliersItemProductSubtotalMin = 0;
+
+export const getProcurementAdviceResponseSuppliersItemShippingFeeMin = 0;
+
+export const getProcurementAdviceResponseSuppliersItemTotalPriceMin = 0;
+
+export const getProcurementAdviceResponseSuppliersItemDeliveryDaysMin = 0;
+
+export const getProcurementAdviceResponseSuppliersItemDistanceKmMin = 0;
+
+
+export const getProcurementAdviceResponseSuppliersItemAnomaliesItemMessageMax = 2000;
+
+
+export const getProcurementAdviceResponseWarningsItemMessageMax = 2000;
+
+
+
+export const GetProcurementAdviceResponse = zod.object({
+  "requestId": zod.number().int().min(1),
+  "generatedAt": zod.coerce.date(),
+  "source": zod.enum(['illustrative_offers']),
+  "maxDeliveryDays": zod.number().int().min(getProcurementAdviceResponseMaxDeliveryDaysMin),
+  "deadlinePassed": zod.boolean(),
+  "deadlinePolicy": zod.enum(['stored_date_utc_midnight']).describe('Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.'),
+  "aiStatus": zod.enum(['success', 'unavailable', 'failed', 'skipped']),
+  "advice": zod.string().max(getProcurementAdviceResponseAdviceMax).nullable(),
+  "suppliers": zod.array(zod.object({
+  "offerId": zod.number().int().min(1),
+  "supplierName": zod.string(),
+  "productSubtotal": zod.number().min(getProcurementAdviceResponseSuppliersItemProductSubtotalMin),
+  "shippingFee": zod.number().min(getProcurementAdviceResponseSuppliersItemShippingFeeMin),
+  "totalPrice": zod.number().min(getProcurementAdviceResponseSuppliersItemTotalPriceMin),
+  "currency": zod.enum(['MYR']),
+  "deliveryDays": zod.number().min(getProcurementAdviceResponseSuppliersItemDeliveryDaysMin),
+  "distanceKm": zod.number().min(getProcurementAdviceResponseSuppliersItemDistanceKmMin),
+  "withinBudget": zod.boolean(),
+  "meetsDeliveryRequirement": zod.boolean(),
+  "anomalies": zod.array(zod.object({
+  "offerId": zod.number().int().min(1),
+  "type": zod.enum(['TOTAL_COST_MISMATCH', 'INVALID_ROUTE', 'UNUSUALLY_HIGH_PRICE', 'UNUSUALLY_HIGH_SHIPPING']),
+  "severity": zod.enum(['high', 'medium']),
+  "message": zod.string().max(getProcurementAdviceResponseSuppliersItemAnomaliesItemMessageMax)
+}))
+})),
+  "warnings": zod.array(zod.object({
+  "offerId": zod.number().int().min(1),
+  "type": zod.enum(['TOTAL_COST_MISMATCH', 'INVALID_ROUTE', 'UNUSUALLY_HIGH_PRICE', 'UNUSUALLY_HIGH_SHIPPING']),
+  "severity": zod.enum(['high', 'medium']),
+  "message": zod.string().max(getProcurementAdviceResponseWarningsItemMessageMax)
+}))
+})
+
+
+/**
  * @summary Approve or reject a supplier offer
  */
 export const DecideProcurementRequestParams = zod.object({

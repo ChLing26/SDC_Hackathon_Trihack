@@ -9,8 +9,13 @@ import { CreateProcurementRequestBody, DecideProcurementRequestBody, DecideProcu
    SignSupplierProcurementInvoiceParams, SignSupplierProcurementInvoiceBody } from "@workspace/api-zod";
 import { createRecord, listRecords, makeInvoice, round } from "../lib/procurement";
 import { attachElectronicSignature, attachSupplierSignature } from "../lib/invoice-signature";
+import { createAdviceHandler } from "./python-advice";
 
 const router: IRouter = Router();
+router.post("/procurement/requests/:requestId/advice", createAdviceHandler(async id => {
+  const [row] = await db.select().from(procurementRecords).where(eq(procurementRecords.id, id));
+  return row?.data;
+}));
 router.get("/procurement/requests", async (_req,res): Promise<void> => {
   res.json(ListProcurementRequestsResponse.parse(await listRecords()));
 });

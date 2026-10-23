@@ -52,6 +52,120 @@ export interface HealthStatus {
   status: string;
 }
 
+export type ProcurementAdviceInputPriority = typeof ProcurementAdviceInputPriority[keyof typeof ProcurementAdviceInputPriority];
+
+
+export const ProcurementAdviceInputPriority = {
+  balanced: 'balanced',
+  lowest_cost: 'lowest_cost',
+  fastest_delivery: 'fastest_delivery',
+} as const;
+
+export interface ProcurementAdviceInput {
+  priority?: ProcurementAdviceInputPriority;
+}
+
+export type ProcurementAdviceWarningType = typeof ProcurementAdviceWarningType[keyof typeof ProcurementAdviceWarningType];
+
+
+export const ProcurementAdviceWarningType = {
+  TOTAL_COST_MISMATCH: 'TOTAL_COST_MISMATCH',
+  INVALID_ROUTE: 'INVALID_ROUTE',
+  UNUSUALLY_HIGH_PRICE: 'UNUSUALLY_HIGH_PRICE',
+  UNUSUALLY_HIGH_SHIPPING: 'UNUSUALLY_HIGH_SHIPPING',
+} as const;
+
+export type ProcurementAdviceWarningSeverity = typeof ProcurementAdviceWarningSeverity[keyof typeof ProcurementAdviceWarningSeverity];
+
+
+export const ProcurementAdviceWarningSeverity = {
+  high: 'high',
+  medium: 'medium',
+} as const;
+
+export interface ProcurementAdviceWarning {
+  /** @minimum 1 */
+  offerId: number;
+  type: ProcurementAdviceWarningType;
+  severity: ProcurementAdviceWarningSeverity;
+  /** @maxLength 2000 */
+  message: string;
+}
+
+export type ProcurementAdviceSupplierCurrency = typeof ProcurementAdviceSupplierCurrency[keyof typeof ProcurementAdviceSupplierCurrency];
+
+
+export const ProcurementAdviceSupplierCurrency = {
+  MYR: 'MYR',
+} as const;
+
+export interface ProcurementAdviceSupplier {
+  /** @minimum 1 */
+  offerId: number;
+  supplierName: string;
+  /** @minimum 0 */
+  productSubtotal: number;
+  /** @minimum 0 */
+  shippingFee: number;
+  /** @minimum 0 */
+  totalPrice: number;
+  currency: ProcurementAdviceSupplierCurrency;
+  /** @minimum 0 */
+  deliveryDays: number;
+  /** @minimum 0 */
+  distanceKm: number;
+  withinBudget: boolean;
+  meetsDeliveryRequirement: boolean;
+  anomalies: ProcurementAdviceWarning[];
+}
+
+export type ProcurementAdviceSource = typeof ProcurementAdviceSource[keyof typeof ProcurementAdviceSource];
+
+
+export const ProcurementAdviceSource = {
+  illustrative_offers: 'illustrative_offers',
+} as const;
+
+/**
+ * Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.
+ */
+export type ProcurementAdviceDeadlinePolicy = typeof ProcurementAdviceDeadlinePolicy[keyof typeof ProcurementAdviceDeadlinePolicy];
+
+
+export const ProcurementAdviceDeadlinePolicy = {
+  stored_date_utc_midnight: 'stored_date_utc_midnight',
+} as const;
+
+export type ProcurementAdviceAiStatus = typeof ProcurementAdviceAiStatus[keyof typeof ProcurementAdviceAiStatus];
+
+
+export const ProcurementAdviceAiStatus = {
+  success: 'success',
+  unavailable: 'unavailable',
+  failed: 'failed',
+  skipped: 'skipped',
+} as const;
+
+export interface ProcurementAdvice {
+  /** @minimum 1 */
+  requestId: number;
+  generatedAt: string;
+  source: ProcurementAdviceSource;
+  /** @minimum 0 */
+  maxDeliveryDays: number;
+  deadlinePassed: boolean;
+  /** Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date. */
+  deadlinePolicy: ProcurementAdviceDeadlinePolicy;
+  aiStatus: ProcurementAdviceAiStatus;
+  /**
+     * @maxLength 20000
+     * @nullable
+     */
+  advice: string | null;
+  suppliers: ProcurementAdviceSupplier[];
+  warnings: ProcurementAdviceWarning[];
+}
+
 export interface ProcurementRequestInput {
   /** @minLength 2 */
   itemName: string;
