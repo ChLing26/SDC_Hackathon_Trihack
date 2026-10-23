@@ -34,3 +34,19 @@ skipping verification or claiming preservation. Before destructive Git recovery
 or a history migration, verify an independently retained private backup copy.
 Do not confuse tracked legacy source/database backups with all-reference Git
 bundles or assume their storage has the same lifetime.
+
+## No-data-change review testing
+
+Use a disposable separate PostgreSQL cluster for database-backed review tests
+when changes to the existing application database are forbidden.
+
+**Why:** The user expressly prohibited existing PostgreSQL changes during
+integration review. The existing API/bootstrap suites write accounts, records
+and schemas even though they clean up fixtures afterwards; cleanup does not make
+those runs read-only.
+
+**How to apply:** Run the isolated test harness, or report database-dependent
+tests as blocked if isolation is unavailable. Do not use the live preview for a
+browser journey that creates approvals/signatures while this restriction is in
+effect. Propose an isolated browser environment instead of silently relaxing the
+data boundary.

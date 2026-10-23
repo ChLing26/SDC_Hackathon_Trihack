@@ -5,6 +5,9 @@ SDC_Hackathon_Trihack backend history using a two-parent, non-squashed Git merge
 The original backend repository is not modified. Experimental task branches are
 preserved through `archive/replit/*` references, not reapplied to the application.
 
+The current review findings, field mappings, backup availability and remaining
+approval gates are recorded in [backend-integration-review.md](backend-integration-review.md).
+
 ## Preserved application boundaries
 
 - `artifacts/procurement-workspace` remains the React application.
@@ -43,12 +46,18 @@ them or migrate them into live data without a separate decision.
 ```sh
 pnpm run typecheck
 pnpm --filter @workspace/procurement-workspace test
-pnpm --filter @workspace/api-server test
+python tests/run_isolated_application_tests.py
 python -m unittest discover -s tests -p 'test_backend_*.py' -v
 python test_anomalies.py
 python test_recommedation.py
 python -m pip check
 ```
+
+The API/bootstrap suites write accounts, signatures, schemas and fixture records.
+Do **not** run them against the project or production PostgreSQL database during
+a no-data-change review. The isolated runner creates a disposable PostgreSQL
+cluster with network listening disabled and a private Unix socket, overrides the
+child processes' database configuration, and stops/removes only that new cluster.
 
 The Python suite parses executable sources and opens both SQLite snapshots
 read-only. A separate test verifies the exact hash and expected syntax failure of
