@@ -1072,6 +1072,15 @@ export function collectSrcsetURLs(srcset) {
   return urls;
 }
 
+export function collectBuiltWasmReferences(outputDirectory) {
+  return collectBuiltCodeReferences(outputDirectory, "/").filter(
+    ({ source, url, resolvedUrl }) =>
+      /\.m?js$/i.test(source) &&
+      /\.wasm(?:[?#]|$)/i.test(resolvedUrl ?? url) &&
+      !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl ?? url),
+  );
+}
+
 export function checkAssetPaths(app, {
   cwd = process.cwd(),
   log = console.log,

@@ -137,6 +137,114 @@ describe("served Vite asset paths", () => {
     );
   });
 
+  it("requests local WebAssembly files referenced by emitted bundles beneath the preview path", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "app.js"),
+      `import("./features/lazy-feature.js");
+new URL("./feature.wasm", import.meta.url);`,
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "lazy-feature.js"),
+      `new URL("./nested-feature.wasm?init", import.meta.url);`,
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname + url.search);
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
+        return response("<div id='root'></div>", "text/html", 200, url.href);
+      }
+      if (url.pathname.endsWith(".wasm")) {
+        return response("wasm", "application/wasm; charset=binary");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("missing", "text/html", 404);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+    );
+
+    assert.ok(requests.includes("/__mockup/assets/feature.wasm"));
+    assert.ok(requests.includes("/__mockup/assets/features/nested-feature.wasm?init"));
+  });
+
+  it("fails when a referenced WebAssembly file returns an HTTP error", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "app.js"),
+      `new URL("./missing.wasm", import.meta.url);`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".wasm")) {
+        return response("missing", "text/plain", 404);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas WebAssembly request .* returned HTTP 404/,
+    );
+  });
+
+  it("rejects a successful WebAssembly request with the wrong response type", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "app.js"),
+      `new URL("./feature.wasm", import.meta.url);`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".wasm")) {
+        return response("not wasm", "application/octet-stream");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas WebAssembly request .* returned content type "application\/octet-stream" instead of application\/wasm/,
+    );
+  });
+
   it("requests local Worker and SharedWorker scripts beneath the configured preview path", async () => {
     const app = makeBuiltApp();
     writeFileSync(

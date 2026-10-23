@@ -5,7 +5,10 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { apps, readPreviewSettings } from "./build-vite-apps.mjs";
-import { collectSrcsetURLs } from "./check-vite-asset-paths.mjs";
+import {
+  collectBuiltWasmReferences,
+  collectSrcsetURLs,
+} from "./check-vite-asset-paths.mjs";
 
 const artifactIndexPaths = {
   "@workspace/procurement-workspace":
@@ -140,6 +143,24 @@ function assertResponse(
   if (!contentType || !definition.contentType.test(contentType)) {
     throw new Error(
       `${appName} ${requestLabel} request ${requestUrl} returned content type "${contentType ?? "missing"}" instead of an expected ${definition.label} type.`,
+    );
+  }
+}
+
+function assertWasmResponse(response, requestUrl, appName) {
+  if (!response.ok) {
+    throw new Error(
+      `${appName} WebAssembly request ${requestUrl} returned HTTP ${response.status}.`,
+    );
+  }
+
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim();
+  if (!contentType || !/^application\/wasm$/i.test(contentType)) {
+    throw new Error(
+      `${appName} WebAssembly request ${requestUrl} returned content type "${contentType ?? "missing"}" instead of application/wasm.`,
     );
   }
 }
@@ -408,8 +429,37 @@ export async function checkServedAssets(
     assertResponse(response, "js", workerUrl, app.name, "web worker");
   }
 
+  const wasmUrls = new Set();
+  for (const { source, url: specifier } of collectBuiltWasmReferences(
+    outputDirectory,
+  )) {
+    const sourceUrl = new URL(source, new URL(normalizedBasePath, origin));
+    const wasmUrl = new URL(specifier, sourceUrl);
+    if (
+      wasmUrl.origin !== new URL(origin).origin ||
+      !wasmUrl.pathname.startsWith(normalizedBasePath)
+    ) {
+      throw new Error(
+        `${app.name} WebAssembly URL "${specifier}" from "${source}" does not resolve beneath configured preview path "${normalizedBasePath}".`,
+      );
+    }
+    wasmUrls.add(wasmUrl.href);
+  }
+
+  for (const wasmUrl of wasmUrls) {
+    let response;
+    try {
+      response = await fetchImpl(wasmUrl);
+    } catch (error) {
+      throw new Error(
+        `${app.name} WebAssembly request ${wasmUrl} failed: ${error.message}`,
+      );
+    }
+    assertWasmResponse(response, wasmUrl, app.name);
+  }
+
   log(
-    `${app.name} served JavaScript, CSS, media, ${responsiveImageUrls.size} responsive image${responsiveImageUrls.size === 1 ? "" : "s"}, ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"}, and ${workerUrls.size} web worker${workerUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
+    `${app.name} served JavaScript, CSS, media, ${responsiveImageUrls.size} responsive image${responsiveImageUrls.size === 1 ? "" : "s"}, ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"}, ${workerUrls.size} web worker${workerUrls.size === 1 ? "" : "s"}, and ${wasmUrls.size} WebAssembly file${wasmUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
   );
 }
 
