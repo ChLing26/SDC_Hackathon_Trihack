@@ -23,7 +23,7 @@ export function safeReturnPath(value: string | null): string {
   try {
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin ||
-      !/^(\/|\/requests(?:\/[1-9]\d*)?|\/approvals|\/invoices|\/recommendations|\/settings)$/.test(url.pathname)) return "/";
+      !/^(\/|\/requests(?:\/[1-9]\d*)?|\/approvals|\/invoices|\/recommendations|\/settings|\/tools)$/.test(url.pathname)) return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch { return "/"; }
 }
