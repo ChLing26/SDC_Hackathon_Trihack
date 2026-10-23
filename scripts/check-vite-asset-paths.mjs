@@ -122,32 +122,65 @@ function collectBuiltCodeReferences(outputDirectory) {
 
 function collectHTMLReferences(html) {
   const references = [];
+  const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const attributePattern =
     /\b(src|href|srcset|imagesrcset|poster)\s*=\s*["']([^"']+)["']/gi;
 
-  for (const match of html.matchAll(attributePattern)) {
-    const attribute = match[1].toLowerCase();
-    const urls =
-      attribute === "srcset" || attribute === "imagesrcset"
-        ? collectSrcsetURLs(match[2])
-        : [match[2]];
+  for (const tagMatch of html.matchAll(tagPattern)) {
+    const element = tagMatch[1].toLowerCase();
+    for (const match of tagMatch[2].matchAll(attributePattern)) {
+      const attribute = match[1].toLowerCase();
+      const urls =
+        attribute === "srcset" || attribute === "imagesrcset"
+          ? collectSrcsetURLs(match[2])
+          : [match[2]];
 
-    for (const url of urls) {
-      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
-      if (attribute === "src" || attribute === "href") {
-        if (
-          !/(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
-            url,
-          )
-        ) {
-          continue;
+      for (const url of urls) {
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+        if (attribute === "src" || attribute === "href") {
+          const isKnownAssetPath =
+            /(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
+              url,
+            );
+          const isMediaReference = isMediaResourceAttribute(
+            element,
+            attribute,
+            tagMatch[2],
+          );
+
+          if (!isKnownAssetPath && !isMediaReference) continue;
         }
+
+        references.push({ url, source: "index.html" });
       }
-      references.push({ url, source: "index.html" });
     }
   }
 
   return references;
+}
+
+function isMediaResourceAttribute(element, attribute, tagAttributes) {
+  if (
+    attribute === "src" &&
+    /^(?:img|video|audio|source|track|embed)$/.test(element)
+  ) {
+    return true;
+  }
+  if (attribute !== "href" || element !== "link") return false;
+
+  const rel =
+    tagAttributes.match(/\brel\s*=\s*["']([^"']+)["']/i)?.[1] ?? "";
+  const as =
+    tagAttributes.match(/\bas\s*=\s*["']([^"']+)["']/i)?.[1] ?? "";
+  const relTokens = rel.toLowerCase().split(/\s+/);
+
+  return (
+    relTokens.some((token) =>
+      /^(?:icon|apple-touch-icon|mask-icon)$/.test(token),
+    ) ||
+    (relTokens.includes("preload") &&
+      /^(?:image|audio|video|track)$/i.test(as))
+  );
 }
 
 function collectInlineStyleReferences(html) {

@@ -53,6 +53,58 @@ describe("Vite preview asset paths", () => {
     assert.match(messages[0], /exist in the build output/);
   });
 
+  it("checks existing extensionless image and media sources without treating navigation links as assets", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+        <img src="/preview/media/brandmark">
+        <video poster="/preview/media/poster"><source src="/preview/media/intro"></video>
+        <link rel="preload" as="image" href="/preview/media/preloaded">
+        <link rel="icon" href="/preview/media/favicon">
+        <a href="/preview/products/item">Product details</a>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    for (const file of [
+      "brandmark",
+      "poster",
+      "intro",
+      "preloaded",
+      "favicon",
+    ]) {
+      writeFileSync(join(outputDirectory, "media", file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing extensionless image and media sources", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+        <img src="/preview/media/missing-image">
+        <audio src="/preview/media/missing-audio"></audio>
+        <link rel="preload" as="image" href="/preview/media/missing-preload">
+        <link rel="icon" href="/preview/media/missing-icon">
+        <a href="/preview/products/missing-item">Product details</a>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /"\/preview\/media\/missing-image"/);
+        assert.match(error.message, /"\/preview\/media\/missing-audio"/);
+        assert.match(error.message, /"\/preview\/media\/missing-preload"/);
+        assert.match(error.message, /"\/preview\/media\/missing-icon"/);
+        assert.doesNotMatch(error.message, /missing-item/);
+        return true;
+      },
+    );
+  });
+
   it("checks comma-separated srcset and imagesrcset candidates while ignoring external and data URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `
