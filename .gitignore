@@ -65,3 +65,4 @@ __pycache__/
 .pythonlibs/
 # Writable Python demo data must not enter Git or replace tracked snapshots.
 /backend-data/
+/generated-artifacts/
