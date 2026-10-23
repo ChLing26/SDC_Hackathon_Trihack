@@ -445,6 +445,47 @@ describe("Vite preview asset paths", () => {
     assert.match(messages[0], /use configured prefix/);
   });
 
+  it("checks extensionless media URLs in built JavaScript without treating route strings as assets", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const icon = "/preview/media/brandmark";
+      const productRoute = "/preview/products/item";
+      const productAPI = "/preview/api/products";
+      const image = document.createElement("img");
+      image.src = "/preview/assets/inline-logo";`,
+    );
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    writeFileSync(join(outputDirectory, "media", "brandmark"), "");
+    writeFileSync(join(assetsDirectory, "inline-logo"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports a missing extensionless media URL assigned in built JavaScript", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const video = document.createElement("video");
+      video.poster = "/preview/assets/missing-poster";`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /"\/preview\/assets\/missing-poster" in assets\/app\.js/,
+    );
+  });
+
   it("ignores missing asset paths in JavaScript comments without treating string contents as comments", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script>',

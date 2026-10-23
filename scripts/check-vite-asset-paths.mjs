@@ -27,6 +27,10 @@ const quotedAssetReferencePattern = new RegExp(
   String.raw`["'\x60]((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["'\x60]`,
   "gi",
 );
+const quotedLocalURLPattern =
+  /(["'\x60])((?:\/|\.\.?\/)[^"'\x60\s()<>;,]+)\1/g;
+const directMediaURLAssignmentPattern =
+  /(?:\.\s*(?:src|poster)\s*=\s*|\.setAttribute\s*\(\s*["'](?:src|poster)["']\s*,\s*|(?:src|poster)\s*:\s*)(?:new\s+URL\s*\(\s*)?$/i;
 const cssUrlReferencePattern = new RegExp(
   String.raw`url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\(?:[0-9a-fA-F]{1,6}[\t\n\f\r ]?|[\s\S])|[^)\s])*))\s*\)`,
   "gi",
@@ -122,10 +126,48 @@ function collectBuiltCodeReferences(outputDirectory) {
         seenUrls.add(match[1]);
         references.push({ url: match[1], source });
       }
+
+      if (!isStylesheet) {
+        for (const match of content.matchAll(quotedLocalURLPattern)) {
+          const url = match[2];
+          if (
+            seenUrls.has(url) ||
+            !isExtensionlessMediaURL(url) ||
+            (!isMediaDirectoryURL(url) &&
+              !directMediaURLAssignmentPattern.test(
+                content.slice(Math.max(0, match.index - 120), match.index),
+              ))
+          ) {
+            continue;
+          }
+          seenUrls.add(url);
+          references.push({ url, source });
+        }
+      }
     }
   }
 
   return references;
+}
+
+function isExtensionlessMediaURL(url) {
+  try {
+    const pathname = new URL(url, "http://preview.local/").pathname;
+    const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
+    return Boolean(filename) && !filename.includes(".");
+  } catch {
+    return false;
+  }
+}
+
+function isMediaDirectoryURL(url) {
+  try {
+    return /(?:^|\/)(?:media|images?|img|audio|video|icons?)(?:\/|$)/i.test(
+      new URL(url, "http://preview.local/").pathname,
+    );
+  } catch {
+    return false;
+  }
 }
 
 function collectHTMLReferences(html, sourcePrefix) {
