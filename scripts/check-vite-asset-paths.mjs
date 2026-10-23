@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -578,6 +584,7 @@ export function checkAssetPaths(app, {
     }
     throw error;
   }
+  const realOutputDirectory = realpathSync(outputDirectory);
 
   const references = [
     ...collectHTMLReferences(html),
@@ -636,11 +643,26 @@ export function checkAssetPaths(app, {
       relativePath.startsWith(`..${sep}`) ||
       resolve(outputDirectory, relativePath) !== assetPath;
 
-    if (
-      escapesOutputDirectory ||
-      !existsSync(assetPath) ||
-      !statSync(assetPath).isFile()
-    ) {
+    if (escapesOutputDirectory || !existsSync(assetPath)) {
+      missingReferences.push({ url, source });
+      continue;
+    }
+
+    try {
+      if (!statSync(assetPath).isFile()) {
+        missingReferences.push({ url, source });
+        continue;
+      }
+
+      const realAssetPath = realpathSync(assetPath);
+      const realRelativePath = relative(realOutputDirectory, realAssetPath);
+      if (
+        realRelativePath === ".." ||
+        realRelativePath.startsWith(`..${sep}`)
+      ) {
+        missingReferences.push({ url, source });
+      }
+    } catch {
       missingReferences.push({ url, source });
     }
   }

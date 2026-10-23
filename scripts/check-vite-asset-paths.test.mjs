@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, describe, it } from "node:test";
@@ -377,6 +383,39 @@ describe("Vite preview asset paths", () => {
         );
         return true;
       },
+    );
+  });
+
+  it("rejects a referenced asset symlink that resolves outside the build output", () => {
+    const { app, outputDirectory } = createApp({
+      name: "SymlinkOutside",
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const externalAsset = join(tempRoot, "external-app.js");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(externalAsset, "");
+    symlinkSync(externalAsset, join(assetsDirectory, "app.js"));
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /build output is missing file referenced by URL: "\/preview\/assets\/app\.js"/,
+    );
+  });
+
+  it("accepts a referenced asset symlink that resolves inside the build output", () => {
+    const { app, outputDirectory } = createApp({
+      name: "SymlinkInside",
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const emittedAsset = join(assetsDirectory, "emitted-app.js");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(emittedAsset, "");
+    symlinkSync(emittedAsset, join(assetsDirectory, "app.js"));
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
     );
   });
 
