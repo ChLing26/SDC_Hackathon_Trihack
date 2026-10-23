@@ -111,7 +111,7 @@ test("invalid JSON, content type, shape and oversized bodies are rejected safely
 });
 
 test("upstream authentication or provider HTTP error bodies are not forwarded", async () => {
-  for (const status of [401, 422, 500, 503]) {
+  for (const status of [401, 422, 429, 500, 503]) {
     const call = createPythonAdviceClient({ token: () => TOKEN, fetch: async () => new Response(TOKEN, { status }) });
     await assert.rejects(call(fixture(), {}, NOW), (e: unknown) => e instanceof AdviceError && e.status === 503 && !e.message.includes(TOKEN));
   }
@@ -174,6 +174,50 @@ test("adapter wire contract matches real FastAPI validation with AI disabled and
   assert.equal(result.suppliers[0].totalPrice, 11.3);
   assert.equal(result.warnings[0].offerId, 711);
   assert.equal(result.warnings[0].type, "TOTAL_COST_MISMATCH");
+});
+
+test("real Gemini error handling through FastAPI and adapter preserves checks without leaking provider details", async () => {
+  for (const failure of ["quota", "denied", "timeout", "empty"]) {
+    const record = fixture();
+    record.offers[0].totalPrice = 1;
+    const call = createPythonAdviceClient({ token: () => TOKEN, fetch: async (_url, options) => {
+      const output = execFileSync("python", ["-c", [
+        "import json,sys,os",
+        "from unittest.mock import Mock,patch",
+        "from google.genai.errors import ClientError",
+        "from fastapi.testclient import TestClient",
+        "from api import app",
+        "client=Mock()",
+        "mode=sys.argv[1]",
+        "if mode=='empty': client.models.generate_content.return_value.text=''",
+        "elif mode=='timeout': client.models.generate_content.side_effect=TimeoutError('fixture-private-provider-detail')",
+        "else: client.models.generate_content.side_effect=ClientError(429 if mode=='quota' else 403, {'error':{'message':'fixture-private-provider-detail','status':'RESOURCE_EXHAUSTED' if mode=='quota' else 'PERMISSION_DENIED'}})",
+        "with patch('ai_advisor.client',client), TestClient(app) as c:",
+        " r=c.post('/supplier-advice',json=json.load(sys.stdin),headers={'Authorization':'Bearer '+os.environ['PYTHON_BACKEND_TOKEN']})",
+        " assert client.models.generate_content.call_count==1",
+        " assert r.json()['ai_status']=='failed'",
+        " assert 'fixture-private-provider-detail' not in r.text",
+        " print(json.dumps({'status':r.status_code,'body':r.json()}))",
+      ].join("\n"), failure], {
+        cwd: path.resolve(import.meta.dirname, "../../../.."), input: String(options?.body),
+        encoding: "utf8", timeout: 10_000,
+        env: { ...process.env, PYTHON_BACKEND_TOKEN: TOKEN, GEMINI_API_KEY: "", DATABASE_URL: "", PYTHON_SQLITE_PATH: "" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const result = JSON.parse(output) as { status: number; body: unknown };
+      assert.equal(result.status, 200);
+      return json(result.body);
+    } });
+    const result = await call(record, {}, NOW);
+    assert.equal(result.aiStatus, "failed");
+    assert.equal(result.advice, "AI advice is unavailable. Eligibility and anomaly checks are still available.");
+    assert.equal(result.suppliers[0].totalPrice, 11.3);
+    assert.equal(result.suppliers[0].withinBudget, true);
+    assert.equal(result.suppliers[1].withinBudget, false);
+    assert.equal(result.suppliers[1].meetsDeliveryRequirement, false);
+    assert.equal(result.warnings[0].offerId, 711);
+    assert.equal(result.warnings[0].type, "TOTAL_COST_MISMATCH");
+  }
 });
 
 test("non-MYR, duplicate IDs, unsafe numeric values and invalid precision rejected before transport", () => {
