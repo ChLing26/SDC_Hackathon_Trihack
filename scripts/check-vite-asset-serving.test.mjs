@@ -162,6 +162,92 @@ describe("served Vite asset paths", () => {
     );
   });
 
+  it("requests local srcset and imagesrcset candidates beneath the configured preview path", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath),
+      `<script type="module" src="/__mockup/assets/app.js"></script>
+<link rel="stylesheet" href="/__mockup/assets/app.css">
+<link rel="icon" href="/__mockup/assets/icon.svg">
+<img srcset="/__mockup/assets/small.webp 1x, /__mockup/assets/large.webp 2x">
+<link rel="preload" as="image" imagesrcset="/__mockup/assets/preload-small.avif 1x, /__mockup/assets/preload-large.avif 2x">`,
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname);
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
+        return response("<div id='root'></div>", "text/html", 200, url.href);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      if (url.pathname.endsWith(".webp"))
+        return response("image", "image/webp");
+      if (url.pathname.endsWith(".avif"))
+        return response("image", "image/avif");
+      return response("missing", "text/html", 404);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+    );
+
+    assert.deepEqual(requests.slice(5, 9), [
+      "/__mockup/assets/small.webp",
+      "/__mockup/assets/large.webp",
+      "/__mockup/assets/preload-small.avif",
+      "/__mockup/assets/preload-large.avif",
+    ]);
+  });
+
+  it("rejects app-shell HTML returned for a responsive image candidate", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath),
+      `<script type="module" src="/__mockup/assets/app.js"></script>
+<link rel="stylesheet" href="/__mockup/assets/app.css">
+<link rel="icon" href="/__mockup/assets/icon.svg">
+<img srcset="/__mockup/assets/small.webp 1x, /__mockup/assets/missing.webp 2x">`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/__mockup/assets/missing.webp") {
+        return response("<html>app shell</html>", "text/html");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      if (url.pathname.endsWith(".webp"))
+        return response("image", "image/webp");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas responsive image request .*missing\.webp returned content type "text\/html"/,
+    );
+  });
+
   it("fails when the server does not return the app shell for a nested route", async () => {
     const app = makeBuiltApp();
     const fetchImpl = async (input) => {

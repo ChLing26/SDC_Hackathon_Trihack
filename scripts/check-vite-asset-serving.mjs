@@ -5,6 +5,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { apps, readPreviewSettings } from "./build-vite-apps.mjs";
+import { collectSrcsetURLs } from "./check-vite-asset-paths.mjs";
 
 const artifactIndexPaths = {
   "@workspace/procurement-workspace":
@@ -35,23 +36,31 @@ const assetTypes = {
 };
 
 function expectedAssetPaths(html) {
-  const paths = { js: [], css: [], media: [] };
-  const attributePattern = /\b(src|href|poster)\s*=\s*["']([^"']+)["']/gi;
+  const paths = { js: [], css: [], media: [], responsiveMedia: [] };
+  const attributePattern =
+    /\b(src|href|poster|srcset|imagesrcset)\s*=\s*["']([^"']+)["']/gi;
 
   for (const [, attribute, value] of html.matchAll(attributePattern)) {
-    if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#|data:)/i.test(value)) continue;
+    const isResponsiveImage =
+      attribute.toLowerCase() === "srcset" ||
+      attribute.toLowerCase() === "imagesrcset";
+    const values = isResponsiveImage ? collectSrcsetURLs(value) : [value];
 
-    let pathname;
-    try {
-      pathname = new URL(value, "http://preview.local/").pathname;
-    } catch {
-      continue;
-    }
+    for (const assetUrl of values) {
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#|data:)/i.test(assetUrl)) continue;
 
-    for (const [type, definition] of Object.entries(assetTypes)) {
-      if (definition.extension.test(pathname)) {
-        paths[type].push(value);
-        break;
+      let pathname;
+      try {
+        pathname = new URL(assetUrl, "http://preview.local/").pathname;
+      } catch {
+        continue;
+      }
+
+      for (const [type, definition] of Object.entries(assetTypes)) {
+        if (definition.extension.test(pathname)) {
+          paths[isResponsiveImage ? "responsiveMedia" : type].push(assetUrl);
+          break;
+        }
       }
     }
   }
@@ -309,6 +318,32 @@ export async function checkServedAssets(
     assertResponse(response, type, resolvedAssetUrl.href, app.name);
   }
 
+  const responsiveImageUrls = new Set();
+  for (const imagePath of assetPaths.responsiveMedia) {
+    const imageUrl = new URL(imagePath, nestedPage.responseUrl);
+    if (
+      imageUrl.origin !== new URL(origin).origin ||
+      !imageUrl.pathname.startsWith(normalizedBasePath)
+    ) {
+      throw new Error(
+        `${app.name} responsive image URL "${imagePath}" does not resolve beneath configured preview path "${normalizedBasePath}" from the nested route.`,
+      );
+    }
+    responsiveImageUrls.add(imageUrl.href);
+  }
+
+  for (const imageUrl of responsiveImageUrls) {
+    let response;
+    try {
+      response = await fetchImpl(imageUrl);
+    } catch (error) {
+      throw new Error(
+        `${app.name} responsive image request ${imageUrl} failed: ${error.message}`,
+      );
+    }
+    assertResponse(response, "media", imageUrl, app.name, "responsive image");
+  }
+
   const lazyChunkUrls = new Set();
   for (const { source, specifier } of collectLazyChunkReferences(
     outputDirectory,
@@ -345,7 +380,7 @@ export async function checkServedAssets(
   }
 
   log(
-    `${app.name} served JavaScript, CSS, media, and ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
+    `${app.name} served JavaScript, CSS, media, ${responsiveImageUrls.size} responsive image${responsiveImageUrls.size === 1 ? "" : "s"}, and ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
   );
 }
 

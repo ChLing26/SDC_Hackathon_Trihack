@@ -426,7 +426,7 @@ function lineNumberAt(text, offset) {
   return text.slice(0, offset).split(/\r\n|\r|\n/).length;
 }
 
-function collectSrcsetURLs(srcset) {
+export function collectSrcsetURLs(srcset) {
   const urls = [];
   let position = 0;
 
