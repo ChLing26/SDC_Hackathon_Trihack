@@ -789,6 +789,73 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("reports missing local image, stylesheet, and font resources in emitted SVGs", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<script src="/__mockup/assets/app.js"></script><img src="/__mockup/assets/illustration.svg">',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(assetsDirectory, "illustration.svg"),
+      `<svg xmlns="http://www.w3.org/2000/svg">
+        <image href="./images/missing-image.webp"/>
+        <link rel="stylesheet" href="./styles/missing.css"/>
+        <style>@font-face { src: url("./fonts/missing.woff2"); }</style>
+      </svg>`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /Canvas build output is missing files/);
+        assert.match(error.message, /"\.\/images\/missing-image\.webp" in assets\/illustration\.svg/);
+        assert.match(error.message, /"\.\/styles\/missing\.css" in assets\/illustration\.svg/);
+        assert.match(error.message, /"\.\/fonts\/missing\.woff2" in assets\/illustration\.svg/);
+        return true;
+      },
+    );
+  });
+
+  it("checks SVG resources relative to their emitted file and allows external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script><img src="/preview/assets/illustration.svg">',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(join(assetsDirectory, "images"), { recursive: true });
+    mkdirSync(join(assetsDirectory, "styles"), { recursive: true });
+    mkdirSync(join(assetsDirectory, "fonts"), { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(join(assetsDirectory, "images", "existing.webp"), "");
+    writeFileSync(join(assetsDirectory, "images", "absolute.webp"), "");
+    writeFileSync(join(assetsDirectory, "styles", "site.css"), "");
+    writeFileSync(join(assetsDirectory, "fonts", "site.woff2"), "");
+    writeFileSync(
+      join(assetsDirectory, "illustration.svg"),
+      `<?xml-stylesheet type="text/css" href="./styles/site.css"?>
+      <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <image href="./images/existing.webp"/>
+        <image data-href="./images/ignored.webp"/>
+        <image xlink:href="/preview/assets/images/absolute.webp"/>
+        <image href="https://cdn.example.test/missing.webp"/>
+        <image href="data:image/png;base64,AAAA"/>
+        <use href="#local-symbol"/>
+        <link rel="stylesheet" href="./styles/site.css"/>
+        <style>
+          @font-face { src: url("./fonts/site.woff2"); }
+          .remote { background: url("https://cdn.example.test/missing.woff2"); }
+          .embedded { background: url("data:font/woff2;base64,AAAA"); }
+        </style>
+      </svg>`,
+    );
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("ignores image and font URLs in CSS comments but validates active URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>

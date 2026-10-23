@@ -150,6 +150,91 @@ function collectBuiltCodeReferences(outputDirectory) {
   return references;
 }
 
+function collectBuiltSVGReferences(outputDirectory) {
+  const references = [];
+  const pendingDirectories = [outputDirectory];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || !/\.svg$/i.test(entry.name)) continue;
+
+      const source = relative(outputDirectory, entryPath).split(sep).join("/");
+      references.push(
+        ...collectSVGReferences(readFileSync(entryPath, "utf8"), source),
+      );
+    }
+  }
+
+  return references;
+}
+
+function collectSVGReferences(svg, source) {
+  const references = [];
+  const resourceElements =
+    /^(?:image|feimage|use|script|link|font-face-uri|mpath|textpath|tref|lineargradient|radialgradient|pattern|filter|mask|marker|clippath|symbol|view)$/i;
+  const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
+  const hrefPattern =
+    /(?:^|\s)(?:xlink:)?(?:href|src)\s*=\s*(["'])([\s\S]*?)\1/gi;
+
+  for (const tagMatch of svg.matchAll(tagPattern)) {
+    if (!resourceElements.test(tagMatch[1])) continue;
+    for (const match of tagMatch[2].matchAll(hrefPattern)) {
+      const url = match[2].trim();
+      const resolvedUrl = decodeHtmlCharacterReferences(url).value;
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
+      references.push({ url, resolvedUrl, source });
+    }
+  }
+
+  // SVG files can attach a stylesheet outside the root element.
+  const stylesheetInstructionPattern =
+    /<\?xml-stylesheet\b[^>]*\bhref\s*=\s*(["'])([\s\S]*?)\1[^>]*\?>/gi;
+  for (const match of svg.matchAll(stylesheetInstructionPattern)) {
+    const url = match[2].trim();
+    const resolvedUrl = decodeHtmlCharacterReferences(url).value;
+    if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
+    references.push({ url, resolvedUrl, source });
+  }
+
+  const cssContents = [];
+  for (const match of svg.matchAll(/\sstyle\s*=\s*(["'])([\s\S]*?)\1/gi)) {
+    cssContents.push(match[2]);
+  }
+  for (const match of svg.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)) {
+    cssContents.push(match[1]);
+  }
+
+  for (const css of cssContents) {
+    const commentStrippedCSS = stripCssComments(css);
+    for (const match of commentStrippedCSS.matchAll(cssUrlReferencePattern)) {
+      const reference = createCssURLReference(match, source);
+      if (
+        reference &&
+        !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(
+          reference.resolvedUrl ?? reference.url,
+        )
+      ) {
+        references.push(reference);
+      }
+    }
+    for (const match of commentStrippedCSS.matchAll(
+      cssImportReferencePattern,
+    )) {
+      const url = match[1];
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+      references.push({ url, resolvedUrl: decodeCssEscapes(url), source });
+    }
+  }
+
+  return references;
+}
+
 function isExtensionlessMediaURL(url) {
   try {
     const pathname = new URL(url, "http://preview.local/").pathname;
@@ -652,6 +737,7 @@ export function checkAssetPaths(app, {
           reference.resolvedUrl ?? reference.url,
         ),
     ),
+    ...collectBuiltSVGReferences(outputDirectory),
   ];
 
   if (references.length === 0) {
