@@ -4,4 +4,5 @@
 - [Imported backend boundaries](backend-boundaries.md) — Preserving backend history does not authorize public exposure, replacing live data, or reapplying experimental branches.
 - [Python runtime](python-runtime.md) — Full tooling and project-local package targets avoid the Nix pip wrapper's conflicting user-site installation settings.
 - [Bundled asset URL resolution](bundled-asset-urls.md) — Resolve relative chunk and stylesheet references from their emitting file before judging whether they stay under the preview base path.
+- [Temporary Vite preview servers](preview-asset-probes.md) — Stop pnpm-launched preview checks by process group so child servers cannot keep checks alive.
 - [Gemini request retries](gemini-request-retries.md) — Keep per-call retry limits explicit; the SDK can retry transient failures unless each request bounds attempts.
