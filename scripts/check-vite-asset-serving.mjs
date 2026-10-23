@@ -68,10 +68,12 @@ function expectedAssetPaths(html) {
   return paths;
 }
 
-function collectLazyChunkReferences(outputDirectory) {
+function collectBundledScriptReferences(outputDirectory) {
   const references = [];
   const pendingDirectories = [outputDirectory];
   const dynamicImportPattern = /\bimport\s*\(\s*(["'\x60])([^"'\x60]+)\1\s*\)/g;
+  const workerPattern =
+    /\bnew\s+(?:Worker|SharedWorker)\s*\(\s*(?:new\s+URL\s*\(\s*)?(["'\x60])([^"'\x60]+)\1/g;
 
   while (pendingDirectories.length > 0) {
     const directory = pendingDirectories.pop();
@@ -96,7 +98,20 @@ function collectLazyChunkReferences(outputDirectory) {
           continue;
         }
         if (!/\.(?:m?js)$/i.test(pathname)) continue;
-        references.push({ source, specifier });
+        references.push({ source, specifier, isWorker: false });
+      }
+
+      for (const match of content.matchAll(workerPattern)) {
+        const specifier = match[2];
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(specifier)) continue;
+        let pathname;
+        try {
+          pathname = new URL(specifier, "http://preview.local/").pathname;
+        } catch {
+          continue;
+        }
+        if (!/\.(?:m?js)$/i.test(pathname)) continue;
+        references.push({ source, specifier, isWorker: true });
       }
     }
   }
@@ -345,20 +360,22 @@ export async function checkServedAssets(
   }
 
   const lazyChunkUrls = new Set();
-  for (const { source, specifier } of collectLazyChunkReferences(
+  const workerUrls = new Set();
+  for (const { source, specifier, isWorker } of collectBundledScriptReferences(
     outputDirectory,
   )) {
     const sourceUrl = new URL(source, new URL(normalizedBasePath, origin));
-    const chunkUrl = new URL(specifier, sourceUrl);
+    const scriptUrl = new URL(specifier, sourceUrl);
+    const requestLabel = isWorker ? "web worker" : "lazy-loaded JavaScript chunk";
     if (
-      chunkUrl.origin !== new URL(origin).origin ||
-      !chunkUrl.pathname.startsWith(normalizedBasePath)
+      scriptUrl.origin !== new URL(origin).origin ||
+      !scriptUrl.pathname.startsWith(normalizedBasePath)
     ) {
       throw new Error(
-        `${app.name} lazy-loaded JavaScript chunk URL "${specifier}" from "${source}" does not resolve beneath configured preview path "${normalizedBasePath}".`,
+        `${app.name} ${requestLabel} URL "${specifier}" from "${source}" does not resolve beneath configured preview path "${normalizedBasePath}".`,
       );
     }
-    lazyChunkUrls.add(chunkUrl.href);
+    (isWorker ? workerUrls : lazyChunkUrls).add(scriptUrl.href);
   }
 
   for (const chunkUrl of lazyChunkUrls) {
@@ -379,8 +396,20 @@ export async function checkServedAssets(
     );
   }
 
+  for (const workerUrl of workerUrls) {
+    let response;
+    try {
+      response = await fetchImpl(workerUrl);
+    } catch (error) {
+      throw new Error(
+        `${app.name} web worker request ${workerUrl} failed: ${error.message}`,
+      );
+    }
+    assertResponse(response, "js", workerUrl, app.name, "web worker");
+  }
+
   log(
-    `${app.name} served JavaScript, CSS, media, ${responsiveImageUrls.size} responsive image${responsiveImageUrls.size === 1 ? "" : "s"}, and ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
+    `${app.name} served JavaScript, CSS, media, ${responsiveImageUrls.size} responsive image${responsiveImageUrls.size === 1 ? "" : "s"}, ${lazyChunkUrls.size} lazy-loaded JavaScript chunk${lazyChunkUrls.size === 1 ? "" : "s"}, and ${workerUrls.size} web worker${workerUrls.size === 1 ? "" : "s"} successfully from ${normalizedBasePath} and nested route ${nestedPath}.`,
   );
 }
 

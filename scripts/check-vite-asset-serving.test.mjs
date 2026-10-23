@@ -137,6 +137,116 @@ describe("served Vite asset paths", () => {
     );
   });
 
+  it("requests local Worker and SharedWorker scripts beneath the configured preview path", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath.replace("index.html", "assets/app.js")),
+      `import("./features/lazy-feature.js");
+new Worker(new URL("./features/feature-worker.js", import.meta.url), { type: "module" });
+new SharedWorker("/__mockup/assets/shared-worker.js");`,
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "feature-worker.js"),
+      "self.onmessage = () => {};",
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "shared-worker.js"),
+      "self.onconnect = () => {};",
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname);
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
+        return response("<div id='root'></div>", "text/html", 200, url.href);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("missing", "text/html", 404);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+    );
+
+    assert.ok(requests.includes("/__mockup/assets/features/feature-worker.js"));
+    assert.ok(requests.includes("/__mockup/assets/shared-worker.js"));
+  });
+
+  it("rejects app-shell HTML returned instead of a web worker script", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath.replace("index.html", "assets/app.js")),
+      `new Worker(new URL("./features/feature-worker.js", import.meta.url), { type: "module" });`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith("/feature-worker.js")) {
+        return response("<html>app shell</html>", "text/html");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas web worker request .* returned content type "text\/html"/,
+    );
+  });
+
+  it("fails when a web worker request returns an HTTP error", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath.replace("index.html", "assets/app.js")),
+      `new Worker("/__mockup/assets/feature-worker.js");`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith("/feature-worker.js")) {
+        return response("missing", "text/plain", 404);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas web worker request .* returned HTTP 404/,
+    );
+  });
+
   it("rejects app-shell HTML returned instead of an image", async () => {
     const app = makeBuiltApp();
     const fetchImpl = async (input) => {
