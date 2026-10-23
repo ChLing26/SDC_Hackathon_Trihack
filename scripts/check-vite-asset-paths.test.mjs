@@ -486,6 +486,61 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks local CSS files imported with url() while ignoring external imports", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `@import url("./theme.css");
+      @import url("assets/nested.css");
+      @import url("/preview/assets/layout.css");
+      @import url("https://cdn.example.test/external.css");`,
+    );
+    writeFileSync(join(assetsDirectory, "theme.css"), "");
+    writeFileSync(join(assetsDirectory, "layout.css"), "");
+    mkdirSync(join(assetsDirectory, "assets"), { recursive: true });
+    writeFileSync(join(assetsDirectory, "assets", "nested.css"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing CSS files imported with url() and their stylesheet source", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `@import url("./missing-theme.css");
+      @import url("/__mockup/assets/missing-layout.css");`,
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\.\/missing-theme\.css" in assets\/styles\.css/,
+        );
+        assert.match(
+          error.message,
+          /"\/__mockup\/assets\/missing-layout\.css" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("resolves CSS-escaped filenames relative to the emitted stylesheet", () => {
     const { app, outputDirectory } = createApp({
       html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',

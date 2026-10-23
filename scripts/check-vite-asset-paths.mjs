@@ -684,7 +684,7 @@ function decodeCssEscapes(value) {
 function resolveReferenceURL({ url, resolvedUrl, source }, basePath) {
   const referenceUrl = resolvedUrl ?? url;
   const sourceBase =
-    source.startsWith("index.html") || referenceUrl.startsWith("assets/")
+    source.startsWith("index.html")
       ? `http://preview.local${basePath}`
       : `http://preview.local${basePath}${source}`;
   return new URL(referenceUrl, sourceBase);
