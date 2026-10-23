@@ -78,6 +78,68 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks local assets in HTML style attributes and style blocks while ignoring external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background-image: url('/preview/assets/inline.webp'); mask-image: url(https://cdn.example.test/mask.svg); border-image: url(data:image/svg+xml;base64,AAAA)"></div>
+<style>
+@import "/preview/assets/theme.css";
+@import "https://cdn.example.test/external.css";
+.hero { background-image: url("/preview/assets/block.svg"); }
+</style>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of ["app.js", "inline.webp", "theme.css", "block.svg"]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing inline-style assets with their HTML line and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background: url('/preview/assets/missing-inline.webp')"></div>
+<style>
+@import "/preview/assets/missing-import.css";
+.hero { background: url('/preview/assets/missing-block.svg'); }
+</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /"\/preview\/assets\/missing-inline\.webp" in index\.html:2/);
+        assert.match(error.message, /"\/preview\/assets\/missing-import\.css" in index\.html:4/);
+        assert.match(error.message, /"\/preview\/assets\/missing-block\.svg" in index\.html:5/);
+        return true;
+      },
+    );
+  });
+
+  it("reports wrong base paths in inline styles with their HTML source location and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<style>.hero { background: url("/assets/wrong-prefix.svg"); }</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(error.message, /"\/assets\/wrong-prefix\.svg" in index\.html:2/);
+        return true;
+      },
+    );
+  });
+
   it("reports a missing media poster with the app name and offending URL", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",

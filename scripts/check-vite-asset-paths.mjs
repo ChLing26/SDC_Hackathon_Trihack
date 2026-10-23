@@ -25,6 +25,8 @@ const cssUrlReferencePattern = new RegExp(
   String.raw`url\(\s*["']?((?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["']?\s*\)`,
   "gi",
 );
+const cssImportReferencePattern =
+  /@import\s+(?!url\s*\()\s*["']((?:\/|\.\.?\/)?[^"'\x60\s()<>;,]+?\.css(?:[?#][^"'\x60\s()<>;,]*)?)["']/gi;
 
 function readManifestPaths(manifestPath, cwd = process.cwd()) {
   const manifest = readFileSync(resolve(cwd, manifestPath), "utf8");
@@ -138,6 +140,42 @@ function collectHTMLReferences(html) {
   return references;
 }
 
+function collectInlineStyleReferences(html) {
+  const references = [];
+  const styleAttributePattern = /\sstyle\s*=\s*(["'])([\s\S]*?)\1/gi;
+  const styleBlockPattern = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
+
+  function addStyleReferences(style, sourceOffset) {
+    for (const pattern of [cssUrlReferencePattern, cssImportReferencePattern]) {
+      for (const match of style.matchAll(pattern)) {
+        const url = match[1];
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+
+        references.push({
+          url,
+          source: `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
+        });
+      }
+    }
+  }
+
+  for (const match of html.matchAll(styleAttributePattern)) {
+    const styleOffset = match.index + match[0].indexOf(match[2]);
+    addStyleReferences(match[2], styleOffset);
+  }
+
+  for (const match of html.matchAll(styleBlockPattern)) {
+    const styleOffset = match.index + match[0].indexOf(match[1]);
+    addStyleReferences(match[1], styleOffset);
+  }
+
+  return references;
+}
+
+function lineNumberAt(text, offset) {
+  return text.slice(0, offset).split(/\r\n|\r|\n/).length;
+}
+
 function collectSrcsetURLs(srcset) {
   const urls = [];
   let position = 0;
@@ -190,6 +228,7 @@ export function checkAssetPaths(app, {
 
   const references = [
     ...collectHTMLReferences(html),
+    ...collectInlineStyleReferences(html),
     ...collectBuiltCodeReferences(outputDirectory).filter(
       ({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url),
     ),
@@ -260,7 +299,7 @@ export function checkAssetPaths(app, {
 
 function resolveReferenceURL({ url, source }, basePath) {
   const sourceBase =
-    source === "index.html" || url.startsWith("assets/")
+    source.startsWith("index.html") || url.startsWith("assets/")
       ? `http://preview.local${basePath}`
       : `http://preview.local${basePath}${source}`;
   return new URL(url, sourceBase);
