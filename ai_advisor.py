@@ -1,4 +1,5 @@
 import os
+import re
 from math import isfinite
 from pathlib import Path
 from dotenv import load_dotenv
@@ -81,6 +82,43 @@ def classify_gemini_error(error: Exception) -> GeminiProviderError:
     if code in (400, 404, 422) or status_name in {"NOT_FOUND", "INVALID_ARGUMENT"}:
         return GeminiProviderError("model", provider_status or 404)
     return GeminiProviderError("provider", provider_status or 502)
+
+
+def _mentions_supplier(text, supplier):
+    """Match a supplier's stable quote ID or complete display name."""
+    for value in (supplier.get("quote_id"), supplier.get("name")):
+        if not value:
+            continue
+        if re.search(
+            rf"(?<!\w){re.escape(str(value))}(?!\w)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _safe_eligibility_advice(eligible_suppliers, budget, max_delivery_days):
+    """Build a factual response without model-generated recommendations."""
+    if not eligible_suppliers:
+        return (
+            "No supplier meets both requirements: a maximum total budget of "
+            f"RM {budget:.2f} and delivery within {max_delivery_days} days. "
+            "No supplier can be recommended under the current requirements."
+        )
+
+    lines = [
+        "Only the following quotes meet both requirements: "
+        f"a maximum total budget of RM {budget:.2f} and delivery within "
+        f"{max_delivery_days} days."
+    ]
+    for supplier in eligible_suppliers:
+        label = supplier.get("quote_id") or supplier["name"]
+        lines.append(
+            f"- {label}: RM {supplier['total_cost_rm']:.2f} total, "
+            f"{supplier['delivery_days']} days delivery."
+        )
+    return "\n".join(lines)
 
 
 # 2. Smart Supplier Recommendation
@@ -245,6 +283,23 @@ def get_smart_advice(
 
         if not response.text:
             raise RuntimeError("Gemini returned an empty response.")
+
+        # The model's text is not an authority on supplier eligibility. If it
+        # names any quote that fails either hard requirement, discard the
+        # entire response and return a deterministic summary of eligible quotes.
+        ineligible_suppliers = [
+            supplier
+            for supplier in processed_suppliers
+            if not supplier["within_budget"]
+            or not supplier["meets_delivery_requirement"]
+        ]
+        if any(
+            _mentions_supplier(response.text, supplier)
+            for supplier in ineligible_suppliers
+        ):
+            return _safe_eligibility_advice(
+                eligible_suppliers, budget, max_delivery_days,
+            )
 
         return response.text
 

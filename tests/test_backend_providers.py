@@ -2,6 +2,7 @@
 
 import base64
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import httpx
@@ -19,6 +20,74 @@ SUPPLIERS = [{
 
 
 class ProviderChecks(unittest.TestCase):
+    def test_ineligible_recommendations_are_replaced_with_constraint_checked_advice(self):
+        suppliers = [
+            {
+                "quote_id": "ok-quote",
+                "name": "Allowed vendor",
+                "product_price_rm": 20,
+                "shipping_rm": 5,
+                "delivery_days": 2,
+                "distance_km": 4,
+            },
+            {
+                "quote_id": "over-budget",
+                "name": "Over budget vendor",
+                "product_price_rm": 30,
+                "shipping_rm": 5,
+                "delivery_days": 2,
+                "distance_km": 3,
+            },
+            {
+                "quote_id": "too-slow",
+                "name": "Late vendor",
+                "product_price_rm": 20,
+                "shipping_rm": 5,
+                "delivery_days": 4,
+                "distance_km": 2,
+            },
+        ]
+        client = Mock()
+        client.models.generate_content.return_value = SimpleNamespace(
+            text=(
+                "Recommend Over budget vendor (over-budget) and Late vendor "
+                "(too-slow). They meet the requirements."
+            ),
+            candidates=[],
+        )
+
+        with patch("ai_advisor.client", client):
+            advice = get_smart_advice(suppliers, budget=30, max_delivery_days=3)
+
+        self.assertIn("Only the following quotes meet both requirements", advice)
+        self.assertIn("ok-quote: RM 25.00 total, 2.0 days delivery", advice)
+        self.assertIn("maximum total budget of RM 30.00", advice)
+        self.assertIn("delivery within 3 days", advice)
+        self.assertNotIn("Over budget vendor", advice)
+        self.assertNotIn("Late vendor", advice)
+        self.assertNotIn("over-budget", advice)
+        self.assertNotIn("too-slow", advice)
+
+    def test_ineligible_recommendation_with_no_eligible_quotes_returns_no_recommendation(self):
+        client = Mock()
+        client.models.generate_content.return_value = SimpleNamespace(
+            text="Recommend Fixture because it is the best supplier.",
+            candidates=[],
+        )
+
+        with patch("ai_advisor.client", client):
+            advice = get_smart_advice(
+                [dict(SUPPLIERS[0], quote_id="fixture-quote")],
+                budget=10,
+                max_delivery_days=1,
+            )
+
+        self.assertIn("No supplier meets both requirements", advice)
+        self.assertIn("maximum total budget of RM 10.00", advice)
+        self.assertIn("delivery within 1 days", advice)
+        self.assertIn("No supplier can be recommended", advice)
+        self.assertNotIn("Recommend Fixture", advice)
+
     def test_missing_gemini_configuration_raises(self):
         with patch("ai_advisor.client", None):
             with self.assertRaises(AIConfigurationError):

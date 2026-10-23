@@ -196,6 +196,7 @@ class BackendRuntimeChecks(unittest.TestCase):
 
         client = Mock()
         client.models.generate_content.return_value.text = "Fixture advice"
+        client.models.generate_content.return_value.candidates = []
         with patch.object(ai_advisor, "client", client):
             result = ai_advisor.get_smart_advice(
                 suppliers=[{
