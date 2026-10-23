@@ -8,7 +8,7 @@
     "check:preview-config": "node scripts/build-vite-apps.mjs --check-only",
     "check:preview-assets": "node scripts/check-vite-asset-paths.mjs",
     "check:preview-asset-serving": "node scripts/check-vite-asset-serving.mjs",
-    "test:preview-config": "node --test scripts/build-vite-apps.test.mjs scripts/check-vite-asset-paths.test.mjs scripts/check-vite-asset-serving.test.mjs",
+    "test:preview-config": "node --test scripts/build-vite-apps.test.mjs scripts/check-vite-asset-paths.test.mjs scripts/check-vite-asset-paths.build.test.mjs scripts/check-vite-asset-serving.test.mjs",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
