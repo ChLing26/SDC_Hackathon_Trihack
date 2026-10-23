@@ -6,6 +6,7 @@ requests or writes to tracked SQLite snapshots are permitted by this suite.
 
 import ast
 import contextlib
+import hashlib
 import importlib.metadata
 import io
 from pathlib import Path
@@ -28,16 +29,25 @@ for dependency in DEPENDENCIES:
 
 
 class SnapshotChecks(unittest.TestCase):
-    def test_imported_python_sources_parse(self):
+    def test_executable_python_sources_parse(self):
+        # The known malformed archival artifact is checked explicitly below.
+        # It is not an executable module and must remain byte-for-byte intact.
         files = [
             *ROOT.glob("*.py"),
             *ROOT.joinpath("src").glob("*.py"),
-            *ROOT.joinpath("backups").glob("*.py"),
+            ROOT / "backups/database_w_input_backup.py",
         ]
         self.assertGreater(len(files), 0)
         for path in files:
             with self.subTest(path=path.relative_to(ROOT)):
                 ast.parse(path.read_text(), filename=str(path))
+
+    def test_archival_ai_backup_is_unchanged_and_known_invalid(self):
+        path = ROOT / "backups/ai_advisor_backup.py"
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                         "7dfef62df1b5bdfde25443f0b479185b985454c0f5932ea02d7b3e6afe04a73b")
+        with self.assertRaises(SyntaxError):
+            ast.parse(path.read_text(), filename=str(path))
 
     def test_sqlite_snapshots_are_readable_without_writes(self):
         required = {

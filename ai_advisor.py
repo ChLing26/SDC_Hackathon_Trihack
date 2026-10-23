@@ -1,7 +1,9 @@
 import os
+from math import isfinite
 from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -14,9 +16,16 @@ load_dotenv(dotenv_path=ENV_PATH, override=False)
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 # Create the client only when a key is available.
-client = genai.Client(api_key=API_KEY) if API_KEY else None
+client = (
+    genai.Client(api_key=API_KEY, http_options=types.HttpOptions(timeout=15000))
+    if API_KEY else None
+)
 
-MODEL_NAME = "gemini-3.8-flash"
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
+
+
+class AIConfigurationError(RuntimeError):
+    """Gemini has no configured credential; not a successful AI response."""
 
 # 2. Smart Supplier Recommendation
 def get_smart_advice(
@@ -30,10 +39,10 @@ def get_smart_advice(
     if not isinstance(suppliers, list) or not suppliers:
         raise ValueError("Please provide at least one supplier.")
 
-    if budget < 0:
+    if not isfinite(budget) or budget < 0:
         raise ValueError("Budget cannot be negative.")
 
-    if max_delivery_days < 0:
+    if not isfinite(max_delivery_days) or max_delivery_days < 0:
         raise ValueError("Delivery days cannot be negative.")
 
     allowed_priorities = {
@@ -80,7 +89,10 @@ def get_smart_advice(
                 f"Invalid numeric data for {supplier['name']}."
             ) from None
 
-        if min(price, shipping, delivery, distance) < 0:
+        if (
+            not all(isfinite(value) for value in (price, shipping, delivery, distance))
+            or min(price, shipping, delivery, distance) < 0
+        ):
             raise ValueError(
                 f"Negative values found for {supplier['name']}."
             )
@@ -153,28 +165,22 @@ def get_smart_advice(
     Python warnings are validation signals and must not be ignored.
     """
 
+    if client is None:
+        raise AIConfigurationError("GEMINI_API_KEY is not configured.")
     try:
-        if client is None:
-            return (
-                "AI advice is unavailable because "
-                "GEMINI_API_KEY is not configured."
-            )
-
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt
         )
 
         if not response.text:
-            return "Gemini returned an empty response. Please try again."
+            raise RuntimeError("Gemini returned an empty response.")
 
         return response.text
 
-    except Exception as error:
-        # Show the actual API error for debugging.
-        print("Gemini API error type:", type(error).__name__)
-        print("Gemini API error details:", str(error))
-        raise
+    except Exception:
+        # Do not leak upstream response bodies, request data or credentials.
+        raise RuntimeError("Gemini request failed.") from None
 
 
 # Test the AI Advisor

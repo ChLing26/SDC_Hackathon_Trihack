@@ -17,3 +17,20 @@ evidence. Review authentication, request units, supplier identity, database path
 and failure behavior before connecting the imported services. Preserve
 experimental branch histories through archival references rather than merging
 them simply because their commit identities are absent from main.
+
+## Verify backup availability, not just previous reports
+
+Recheck that history backup archives actually exist and can be read before any
+operation that relies on them. A past successful checksum report is not proof
+that its container-local files are still available.
+
+**Why:** A later work session retained the integrated Git history but could not
+find the previously reported backup/report directories outside the checkout.
+That observation does not establish whether copies exist elsewhere or why the
+directories are absent.
+
+**How to apply:** Report unavailable archives explicitly rather than silently
+skipping verification or claiming preservation. Before destructive Git recovery
+or a history migration, verify an independently retained private backup copy.
+Do not confuse tracked legacy source/database backups with all-reference Git
+bundles or assume their storage has the same lifetime.

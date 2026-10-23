@@ -1,4 +1,5 @@
 import requests
+from math import isfinite
 
 
 OSRM_BASE_URL = "https://router.project-osrm.org"
@@ -8,8 +9,20 @@ def get_distance(origin, destination):
 
 #origin and destination use:(longitude, latitude)
 
-    lon1, lat1 = origin
-    lon2, lat2 = destination
+    def coordinates(point):
+        try:
+            longitude, latitude = (float(value) for value in point)
+        except (TypeError, ValueError):
+            raise ValueError("Coordinates must be a (longitude, latitude) pair.") from None
+        if (
+            not isfinite(longitude) or not isfinite(latitude)
+            or not -180 <= longitude <= 180 or not -90 <= latitude <= 90
+        ):
+            raise ValueError("Coordinates are outside valid longitude/latitude ranges.")
+        return longitude, latitude
+
+    lon1, lat1 = coordinates(origin)
+    lon2, lat2 = coordinates(destination)
 
     url = (
         f"{OSRM_BASE_URL}/route/v1/driving/"
@@ -35,6 +48,12 @@ def get_distance(origin, destination):
         )
 
     route = data["routes"][0]
+    if any(
+        not isinstance(route.get(field), (int, float))
+        or not isfinite(route[field]) or route[field] < 0
+        for field in ("distance", "duration")
+    ):
+        raise ValueError("OSRM returned invalid distance or duration.")
 
     return {
         "distance_km": round(

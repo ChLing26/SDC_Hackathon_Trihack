@@ -1,22 +1,25 @@
 
-import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date, time, datetime
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import Field
 
+from src.backend_database import (
+    configured_database_path, database_connection, require_catalogue,
+)
+from src.backend_security import RequestModel, require_service_auth
 
-DB_NAME = "business_supplier_selection.db"
+DB_NAME = configured_database_path()
 
 # Database connection
 
+@contextmanager
 def get_connection():
-    conn = sqlite3.connect(DB_NAME, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    with database_connection(DB_NAME, writable=True) as conn:
+        require_catalogue(conn)
+        yield conn
 
 
 # Create the emergency purchase table
@@ -81,7 +84,9 @@ app = FastAPI(
         "and submits an emergency purchase for approval."
     ),
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    dependencies=[Depends(require_service_auth)],
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 
@@ -89,7 +94,7 @@ app = FastAPI(
 # Request and response models
 # --------------------------------------------------
 
-class EmergencyPurchaseRequest(BaseModel):
+class EmergencyPurchaseRequest(RequestModel):
     business_id: int = Field(gt=0)
     item_name: str = Field(min_length=1, max_length=100)
     quantity: float = Field(gt=0)
@@ -101,7 +106,7 @@ class EmergencyPurchaseRequest(BaseModel):
     )
 
 
-class PurchaseDecision(BaseModel):
+class PurchaseDecision(RequestModel):
     decision: Literal["Approved", "Rejected"]
     note: str = Field(default="", max_length=500)
 
@@ -348,7 +353,7 @@ def decide_purchase(
 
         now = datetime.now().isoformat(timespec="seconds")
 
-        conn.execute("""
+        cursor = conn.execute("""
             UPDATE emergency_purchases
             SET status = ?,
                 decision_at = ?,
@@ -361,6 +366,8 @@ def decide_purchase(
             decision.note,
             purchase_id
         ))
+        if cursor.rowcount != 1:
+            raise HTTPException(409, "Purchase request was already decided.")
 
         return {
             "purchase_id": purchase_id,

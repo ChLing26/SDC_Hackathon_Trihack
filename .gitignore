@@ -62,3 +62,6 @@ env/
 # Python cache
 __pycache__/
 *.py[cod]
+.pythonlibs/
+# Writable Python demo data must not enter Git or replace tracked snapshots.
+/backend-data/

@@ -1,23 +1,26 @@
 from typing import Literal
 from statistics import median
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI
+from pydantic import Field
 
-from ai_advisor import get_smart_advice
+from ai_advisor import AIConfigurationError, get_smart_advice
+from src.backend_security import RequestModel, require_service_auth
 
 
 app = FastAPI(
     title="SME Supplier Recommendation API",
     description="Supplier validation, anomaly detection and Gemini AI advice",
-    version="1.1.0"
+    version="1.1.0",
+    dependencies=[Depends(require_service_auth)],
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 
 # 1. Request models
 
-class Supplier(BaseModel):
-    name: str = Field(min_length=1)
+class Supplier(RequestModel):
+    name: str = Field(min_length=1, max_length=200)
     product_price_rm: float = Field(ge=0)
     shipping_rm: float = Field(ge=0)
     delivery_days: float = Field(ge=0)
@@ -25,12 +28,12 @@ class Supplier(BaseModel):
 
     # Optional reported total for consistency checking
     total_cost_rm: float | None = Field(default=None, ge=0)
-    route_status: str = "OK"
+    route_status: str = Field(default="OK", max_length=40)
     score: float | None = None
 
 
-class AdviceRequest(BaseModel):
-    suppliers: list[Supplier] = Field(min_length=1)
+class AdviceRequest(RequestModel):
+    suppliers: list[Supplier] = Field(min_length=1, max_length=100)
     budget: float = Field(ge=0)
     max_delivery_days: float = Field(ge=0)
 
@@ -217,14 +220,12 @@ def supplier_advice(request: AdviceRequest):
             )
             ai_status = "success"
 
-        except Exception as exc:
+        except AIConfigurationError:
+            ai_status = "unavailable"
+            advice = "Gemini AI is not configured. Supplier validation is still available."
+        except Exception:
             # Keep the API working if Gemini is unavailable.
-            print(
-                "Gemini advice failed:",
-                type(exc).__name__,
-                str(exc)
-            )
-
+            # Provider exceptions may include credentials or submitted data.
             ai_status = "failed"
             advice = (
                 "AI advice is temporarily unavailable. "

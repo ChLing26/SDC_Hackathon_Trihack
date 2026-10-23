@@ -2,16 +2,14 @@ import sqlite3
 import random
 import time
 import requests
+from math import isfinite
 
 from datetime import date, timedelta
 from geopy.geocoders import Nominatim
 
-from pathlib import Path
+from src.backend_database import configured_database_path, database_connection
 
-DB_NAME = str(
-    Path(__file__).resolve().parent
-    / "business_supplier_selection.db"
-)
+DB_NAME = configured_database_path()
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
 
 geolocator = Nominatim(
@@ -22,7 +20,7 @@ geolocator = Nominatim(
 
 
 def create_database():
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME, writable=True, create=True) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
         conn.executescript("""
@@ -120,7 +118,7 @@ def input_business():
         print(f"Could not locate the address: {error}")
         return None
 
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME, writable=True) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
         cursor = conn.execute("""
@@ -141,7 +139,7 @@ def input_business():
 # Create fictional suppliers near the business
 
 def create_synthetic_suppliers(business_id):
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME, writable=True) as conn:
         business = conn.execute("""
             SELECT latitude, longitude
             FROM businesses
@@ -237,7 +235,7 @@ def add_sample_offers():
 
     today = date.today()
 
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME, writable=True) as conn:
         conn.executemany("""
             INSERT INTO stationery (item_id, item_name, unit)
             VALUES (?, ?, ?)
@@ -303,7 +301,7 @@ def calculate_road_distance(lat1, lon1, lat2, lon2):
 
 
 def update_supplier_distances(business_id):
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME, writable=True) as conn:
         business = conn.execute("""
             SELECT latitude, longitude
             FROM businesses
@@ -364,10 +362,10 @@ def get_supplier_recommendations(
 ) -> list[dict]:
     """Return eligible suppliers as JSON-compatible dictionaries."""
 
-    if quantity <= 0:
+    if not isfinite(quantity) or quantity <= 0:
         raise ValueError("Quantity must be greater than zero.")
 
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
 
         rows = conn.execute(
@@ -415,7 +413,7 @@ def get_supplier_recommendations(
     return recommendations
 
 def recommend_supplier(business_id, item_name, quantity):
-    with sqlite3.connect(DB_NAME) as conn:
+    with database_connection(DB_NAME) as conn:
         rows = conn.execute("""
             SELECT
                 s.supplier_name,
