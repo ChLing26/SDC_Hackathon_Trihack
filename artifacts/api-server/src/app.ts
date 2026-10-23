@@ -17,7 +17,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
-          url: req.url?.split("?")[0]?.startsWith("/api/tools") ? "/api/tools" : req.url?.split("?")[0],
+          url: req.url?.split("?")[0],
         };
       },
       res(res) {

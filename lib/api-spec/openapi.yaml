@@ -15,86 +15,6 @@ tags:
   - name: procurement
     description: Procurement requests, supplier offers, approvals, invoices, and recommendations
 paths:
-  /tools/capabilities:
-    get:
-      operationId: getToolsCapabilities
-      tags: [tools]
-      responses:
-        "200":
-          description: Current account capability and safe setup status
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ToolsCapabilities" }
-        "401": { $ref: "#/components/responses/AuthError" }
-        "503": { $ref: "#/components/responses/AuthError" }
-  /tools/secrets:
-    get:
-      operationId: listToolsSecrets
-      tags: [tools]
-      responses:
-        "200":
-          description: Metadata only, never stored values
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/SecretMetadata" }
-        "401": { $ref: "#/components/responses/AuthError" }
-        "503": { $ref: "#/components/responses/AuthError" }
-    post:
-      operationId: createToolsSecret
-      tags: [tools]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/SecretInput" }
-      responses:
-        "201":
-          description: Created, metadata only
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SecretMetadata" }
-        "400": { $ref: "#/components/responses/AuthError" }
-        "401": { $ref: "#/components/responses/AuthError" }
-        "403": { $ref: "#/components/responses/AuthError" }
-        "409": { $ref: "#/components/responses/AuthError" }
-        "503": { $ref: "#/components/responses/AuthError" }
-  /tools/secrets/{name}:
-    parameters:
-      - name: name
-        in: path
-        required: true
-        schema: { type: string, pattern: "^[A-Z][A-Z0-9_]{0,63}$", maxLength: 64 }
-    put:
-      operationId: replaceToolsSecret
-      tags: [tools]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/SecretReplacement" }
-      responses:
-        "200":
-          description: Replaced, metadata only
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SecretMetadata" }
-        "400": { $ref: "#/components/responses/AuthError" }
-        "401": { $ref: "#/components/responses/AuthError" }
-        "403": { $ref: "#/components/responses/AuthError" }
-        "404": { $ref: "#/components/responses/AuthError" }
-        "503": { $ref: "#/components/responses/AuthError" }
-    delete:
-      operationId: deleteToolsSecret
-      tags: [tools]
-      responses:
-        "204": { description: Deleted }
-        "400": { $ref: "#/components/responses/AuthError" }
-        "401": { $ref: "#/components/responses/AuthError" }
-        "403": { $ref: "#/components/responses/AuthError" }
-        "404": { $ref: "#/components/responses/AuthError" }
-        "503": { $ref: "#/components/responses/AuthError" }
   /auth/register:
     post:
       operationId: registerAccount
@@ -351,33 +271,6 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/AccountError" }
   schemas:
-    ToolsCapabilities:
-      type: object
-      required: [canManageSecrets, setupRequired]
-      properties:
-        canManageSecrets: { type: boolean }
-        setupRequired: { type: boolean }
-    SecretMetadata:
-      type: object
-      required: [name, configured, createdAt, updatedAt]
-      properties:
-        name: { type: string }
-        configured: { type: boolean }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-    SecretInput:
-      type: object
-      additionalProperties: false
-      required: [name, key]
-      properties:
-        name: { type: string, pattern: "^[A-Z][A-Z0-9_]{0,63}$", minLength: 1, maxLength: 64 }
-        key: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
-    SecretReplacement:
-      type: object
-      additionalProperties: false
-      required: [key]
-      properties:
-        key: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
     AccountUser:
       type: object
       required: [id, name, email]

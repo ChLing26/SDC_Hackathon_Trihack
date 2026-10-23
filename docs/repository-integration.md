@@ -17,7 +17,7 @@ not activate an adapter or change the live database.
 - `artifacts/procurement-workspace` remains the React application.
 - `artifacts/api-server` remains its authenticated Express API.
 - `lib/db` and its existing PostgreSQL migrations remain authoritative for the
-  application, accounts, encrypted Tools secrets, and signed invoices.
+  application, accounts, and signed invoices.
 - The existing buyer/account and supplier-signature evidence and PDF exporter
   are unchanged by the backend import.
 - Root Python modules and `src/` retain the imported backend implementation.
@@ -142,10 +142,8 @@ These are integration prerequisites, not a full production security certificatio
 - `GEMINI_MODEL` can select a provider-supported model; the default is
   `gemini-flash-latest`, replacing the unverified `gemini-3.8-flash` identifier.
   The client has a 15-second request timeout.
-- No Gemini secret exists in the current environment, so live Gemini generation,
-  model availability and quota remain **unverified**. Application Tools secrets
-  are not automatically environment variables. No provider was switched or
-  newly provisioned.
+- Live Gemini generation, model availability, and quota remain **unverified**.
+  No provider was switched or newly provisioned.
 - A live public OSRM KL-to-Shah-Alam route probe succeeded: 25.21 km, 23.8 minutes.
   This is a verification sample, not a fixed quote or delivery promise.
 - Offline provider tests cover distance unit conversion, invalid coordinates,

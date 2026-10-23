@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutGrid, FileStack, Stamp, Receipt, Sparkles, Menu, X, Info, RotateCw, LogOut, Loader2, Users, Settings, Wrench } from "lucide-react";
+import { LayoutGrid, FileStack, Stamp, Receipt, Sparkles, Menu, X, Info, RotateCw, LogOut, Loader2, Users, Settings } from "lucide-react";
 import { useListProcurementRequests } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,6 @@ const NAV = [
   { href: "/approvals", label: "Approvals", icon: Stamp },
   { href: "/invoices", label: "Invoices", icon: Receipt },
   { href: "/recommendations", label: "Insights", icon: Sparkles },
-  { href: "/tools", label: "Tools", icon: Wrench },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -100,7 +99,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </header>
         <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b bg-background/90 backdrop-blur px-4 py-3 md:hidden">
           <button type="button" aria-label="Open navigation menu" aria-expanded={open} onClick={() => setOpen(true)} data-testid="button-open-nav"><Menu className="h-5 w-5" /></button>
-          <span className="font-bold">{loc === "/settings" ? "Settings" : loc === "/tools" ? "Secrets" : "ProcureFlow"}</span>
+          <span className="font-bold">{loc === "/settings" ? "Settings" : "ProcureFlow"}</span>
           {user && <span className="ml-auto max-w-[40%] truncate text-xs text-muted-foreground" data-testid="text-user-name-mobile">{user.name}</span>}
           {user && logoutBtn("mobile", cn("border hover:bg-card", !user && "ml-auto"))}
         </header>

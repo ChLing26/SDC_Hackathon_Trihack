@@ -5,40 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface ToolsCapabilities {
-  canManageSecrets: boolean;
-  setupRequired: boolean;
-}
-
-export interface SecretMetadata {
-  name: string;
-  configured: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SecretInput {
-  /**
-     * @minLength 1
-     * @maxLength 64
-     * @pattern ^[A-Z][A-Z0-9_]{0,63}$
-     */
-  name: string;
-  /**
-     * @minLength 1
-     * @maxLength 4096
-     */
-  key: string;
-}
-
-export interface SecretReplacement {
-  /**
-     * @minLength 1
-     * @maxLength 4096
-     */
-  key: string;
-}
-
 export interface AccountUser {
   id: number;
   name: string;

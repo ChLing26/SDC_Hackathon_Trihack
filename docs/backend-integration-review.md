@@ -53,8 +53,8 @@ tests below. This is an integration review, not a comprehensive security audit.
 | `PIP_TARGET`, `PIP_USER` | Development settings configured | Project-local installation; not service authentication |
 
 Only metadata was inspected. Root `.env` is absent. No secret values were
-printed or changed. Tools' encrypted application secrets do not automatically
-configure Python's process environment. The AI client reads configuration at
+printed or changed. Provider credentials are configured through the project's
+environment settings and never exposed to the browser. The AI client reads configuration at
 import, so an eventual configured process must be restarted.
 
 ## Secure Express-to-Python design, not yet implemented

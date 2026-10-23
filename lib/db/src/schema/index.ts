@@ -19,4 +19,3 @@
 
 export * from "./procurement";
 export * from "./accounts";
-export * from "./tools-secrets";

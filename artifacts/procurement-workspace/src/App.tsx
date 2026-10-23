@@ -16,7 +16,6 @@ import AuthScreen from '@/pages/auth';
 import { AuthProvider, safeReturnPath, useAuth } from '@/lib/auth';
 import { SettingsProvider } from '@/lib/settings';
 import Settings from '@/pages/settings';
-import Tools from '@/pages/tools';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: {
   retry: (count, error) => (error as { status?: number }).status !== 401 && count < 1,
@@ -65,7 +64,6 @@ function Router() {
           <Route path="/invoices" component={Invoices} />
           <Route path="/recommendations" component={Recommendations} />
           <Route path="/settings" component={Settings} />
-          <Route path="/tools" component={Tools} />
           <Route component={NotFound} />
         </Switch>
       </RoutedErrorBoundary>
@@ -76,7 +74,7 @@ function Router() {
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   useEffect(() => {
-    const page = location === "/" ? "Buying activity" : location.startsWith("/requests/") ? "Compare supplier offers" : ({ "/requests": "Procurement requests", "/approvals": "Manager approvals", "/invoices": "Invoice records", "/recommendations": "Supplier insights", "/settings": "Settings", "/tools": "Secrets" }[location] ?? "Workspace");
+    const page = location === "/" ? "Buying activity" : location.startsWith("/requests/") ? "Compare supplier offers" : ({ "/requests": "Procurement requests", "/approvals": "Manager approvals", "/invoices": "Invoice records", "/recommendations": "Supplier insights", "/settings": "Settings" }[location] ?? "Workspace");
     document.title = `${page} · ProcureFlow`;
     document.querySelector('meta[name="description"]')?.setAttribute("content", `${page}: manage SME purchasing requirements, compare supplier quotes, and keep clear approval records with ProcureFlow.`);
   }, [location]);
