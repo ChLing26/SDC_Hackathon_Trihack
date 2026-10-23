@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const apps = [
   {
@@ -15,10 +16,10 @@ const apps = [
   },
 ];
 
-function readPreviewSettings(app) {
+export function readPreviewSettings(app, cwd = process.cwd()) {
   const { name, manifestPath } = app;
   const artifact = `${name} (${manifestPath})`;
-  const manifest = readFileSync(resolve(manifestPath), "utf8");
+  const manifest = readFileSync(resolve(cwd, manifestPath), "utf8");
   let section = "";
   let previewPath;
   let portValue;
@@ -38,17 +39,21 @@ function readPreviewSettings(app) {
     if (section === "") {
       previewPath ??= trimmed.match(/^previewPath\s*=\s*"([^"]+)"\s*$/)?.[1];
     } else if (section === "services") {
-      portValue ??= trimmed.match(/^localPort\s*=\s*(\d+)\s*$/)?.[1];
+      portValue ??= trimmed.match(/^localPort\s*=\s*(.*?)\s*$/)?.[1];
     } else if (section === "services.env") {
       configuredPort ??= trimmed.match(/^PORT\s*=\s*"([^"]+)"\s*$/)?.[1];
       configuredBasePath ??= trimmed.match(/^BASE_PATH\s*=\s*"([^"]+)"\s*$/)?.[1];
     }
   }
 
-  if (!previewPath || !previewPath.startsWith("/") || !portValue) {
-    throw new Error(
-      `Expected ${artifact} to define a root previewPath and a services.localPort.`,
-    );
+  if (!previewPath) {
+    throw new Error(`Expected ${artifact} to define a root previewPath.`);
+  }
+  if (!previewPath.startsWith("/")) {
+    throw new Error(`Expected ${artifact} previewPath to start with "/": "${previewPath}".`);
+  }
+  if (portValue === undefined) {
+    throw new Error(`Expected ${artifact} to define services.localPort.`);
   }
   if (!configuredPort || !configuredBasePath) {
     throw new Error(
@@ -57,7 +62,7 @@ function readPreviewSettings(app) {
   }
 
   const port = Number(portValue);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  if (!/^\d+$/.test(portValue) || !Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid services.localPort in ${artifact}: ${portValue}`);
   }
 
@@ -75,32 +80,46 @@ function readPreviewSettings(app) {
   return { port, basePath: previewPath };
 }
 
-// Validate every artifact before starting any build, so a later mismatch cannot
-// be discovered only after an earlier artifact has already produced output.
-const configuredApps = apps.map((app) => ({
-  ...app,
-  ...readPreviewSettings(app),
-}));
+export function buildApps({
+  appConfigs = apps,
+  cwd = process.cwd(),
+  spawn = spawnSync,
+  env = process.env,
+  log = console.log,
+  checkOnly = false,
+} = {}) {
+  // Validate every artifact before starting any build, so a later mismatch cannot
+  // be discovered only after an earlier artifact has already produced output.
+  const configuredApps = appConfigs.map((app) => ({
+    ...app,
+    ...readPreviewSettings(app, cwd),
+  }));
 
-if (process.argv.includes("--check-only")) {
-  for (const app of configuredApps) {
-    console.log(`${app.name} preview settings match its manifest.`);
+  if (checkOnly) {
+    for (const app of configuredApps) {
+      log(`${app.name} preview settings match its manifest.`);
+    }
+    return 0;
   }
-  process.exit(0);
+
+  for (const app of configuredApps) {
+    log(`Building ${app.packageName} with PORT=${app.port} BASE_PATH=${app.basePath}`);
+
+    const result = spawn(
+      "pnpm",
+      ["--filter", app.packageName, "run", "build"],
+      {
+        stdio: "inherit",
+        env: { ...env, PORT: String(app.port), BASE_PATH: app.basePath },
+      },
+    );
+
+    if (result.error) throw result.error;
+    if (result.status !== 0) return result.status ?? 1;
+  }
+  return 0;
 }
 
-for (const app of configuredApps) {
-  console.log(`Building ${app.packageName} with PORT=${app.port} BASE_PATH=${app.basePath}`);
-
-  const result = spawnSync(
-    "pnpm",
-    ["--filter", app.packageName, "run", "build"],
-    {
-      stdio: "inherit",
-      env: { ...process.env, PORT: String(app.port), BASE_PATH: app.basePath },
-    },
-  );
-
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(buildApps({ checkOnly: process.argv.includes("--check-only") }));
 }
