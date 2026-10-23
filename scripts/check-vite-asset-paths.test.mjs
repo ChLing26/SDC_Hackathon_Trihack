@@ -110,6 +110,46 @@ describe("Vite preview asset paths", () => {
     assert.match(messages[0], /use configured prefix/);
   });
 
+  it("accepts present local images and fonts referenced by linked CSS", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "styles.css"), `
+      @font-face { src: url("./font.woff2"); }
+      .hero { background-image: url("/preview/assets/hero.webp"); }
+      .external { background-image: url("https://cdn.example.test/image.svg"); }
+      .embedded { background-image: url("data:image/png;base64,AAAA"); }
+      .icon { background-image: url(#icon); }
+    `);
+    writeFileSync(join(assetsDirectory, "font.woff2"), "");
+    writeFileSync(join(assetsDirectory, "hero.webp"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }));
+  });
+
+  it("reports the app and URL when a linked CSS asset is missing", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '@font-face{src:url("./missing-font.woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /Canvas build output is missing file referenced by URL: "\.\/missing-font\.woff2" in assets\/styles\.css/,
+    );
+  });
+
   it("reports wrong prefixes in lazy JavaScript chunks and stylesheets", () => {
     for (const { file, content, expectedSource } of [
       {
