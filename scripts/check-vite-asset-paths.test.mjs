@@ -257,6 +257,83 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks local assets in iframe srcdoc and ignores external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe srcdoc="&lt;img src=&quot;/preview/assets/frame.webp&quot;&gt;
+&lt;img src=&quot;assets/frame-relative.webp&quot;&gt;
+&lt;link rel=&quot;stylesheet&quot; href=&quot;/preview/assets/frame.css&quot;&gt;
+&lt;link rel=&quot;stylesheet&quot; href=&quot;assets/frame-relative.css&quot;&gt;
+&lt;img src=&quot;https://cdn.example.test/external.webp&quot;&gt;
+&lt;img src=&quot;data:image/png;base64,AAAA&quot;&gt;
+&lt;style&gt;.hero { background: url('/preview/assets/frame.svg'); mask: url('https://cdn.example.test/mask.svg'); }&lt;/style&gt;"></iframe>
+<iframe srcdoc="<img src='/preview/assets/raw-frame.webp'>"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of [
+      "app.js",
+      "frame.webp",
+      "frame-relative.webp",
+      "frame.css",
+      "frame-relative.css",
+      "frame.svg",
+      "raw-frame.webp",
+    ]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing iframe srcdoc files with the embedded HTML location and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe srcdoc="&lt;img src=&quot;/preview/assets/missing-frame.webp&quot;&gt;
+&lt;style&gt;.hero { background: url('/preview/assets/missing-frame.svg'); }&lt;/style&gt;"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-frame\.webp" in index\.html:2 iframe\[srcdoc\]:1/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-frame\.svg" in index\.html:2 iframe\[srcdoc\]:2/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect iframe srcdoc prefixes with their location and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe srcdoc="&lt;img src=&quot;/assets/wrong-frame-prefix.webp&quot;&gt;"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-frame-prefix\.webp" in index\.html:2 iframe\[srcdoc\]:1/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports a missing media poster with the app name and offending URL", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",

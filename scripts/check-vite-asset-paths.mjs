@@ -120,7 +120,7 @@ function collectBuiltCodeReferences(outputDirectory) {
   return references;
 }
 
-function collectHTMLReferences(html) {
+function collectHTMLReferences(html, sourcePrefix) {
   const references = [];
   const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const attributePattern =
@@ -151,9 +151,52 @@ function collectHTMLReferences(html) {
           if (!isKnownAssetPath && !isMediaReference) continue;
         }
 
-        references.push({ url, source: "index.html" });
+        references.push({
+          url,
+          source: sourcePrefix
+            ? `${sourcePrefix}:${lineNumberAt(html, tagMatch.index)}`
+            : "index.html",
+        });
       }
     }
+  }
+
+  return references;
+}
+
+function collectIframeSrcdocReferences(html, documentSource = "index.html") {
+  const references = [];
+  const iframeStartPattern = /<iframe\b/gi;
+
+  for (const iframeMatch of html.matchAll(iframeStartPattern)) {
+    const tagStart = iframeMatch.index;
+    let quote;
+    let tagEnd = tagStart + iframeMatch[0].length;
+
+    for (; tagEnd < html.length; tagEnd += 1) {
+      const character = html[tagEnd];
+      if (quote) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        break;
+      }
+    }
+
+    if (tagEnd >= html.length) continue;
+    const tag = html.slice(tagStart, tagEnd + 1);
+    const srcdocMatch = tag.match(/\bsrcdoc\s*=\s*(["'])([\s\S]*?)\1/i);
+    if (!srcdocMatch) continue;
+
+    const embeddedHtml = decodeHtmlCharacterReferences(srcdocMatch[2]).value;
+    const iframeSource =
+      `${documentSource}:${lineNumberAt(html, tagStart)} iframe[srcdoc]`;
+    references.push(
+      ...collectHTMLReferences(embeddedHtml, iframeSource),
+      ...collectInlineStyleReferences(embeddedHtml, iframeSource),
+      ...collectIframeSrcdocReferences(embeddedHtml, iframeSource),
+    );
   }
 
   return references;
@@ -183,7 +226,7 @@ function isMediaResourceAttribute(element, attribute, tagAttributes) {
   );
 }
 
-function collectInlineStyleReferences(html) {
+function collectInlineStyleReferences(html, sourcePrefix) {
   const references = [];
   const styleAttributePattern = /\sstyle\s*=\s*(["'])([\s\S]*?)\1/gi;
   const styleBlockPattern = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
@@ -197,7 +240,9 @@ function collectInlineStyleReferences(html) {
     for (const match of commentStrippedStyle.matchAll(cssUrlReferencePattern)) {
       const reference = createCssURLReference(
         match,
-        `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
+        sourcePrefix
+          ? `${sourcePrefix}:${lineNumberAt(html, sourceOffsetAt(match.index))}`
+          : `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
       );
       if (!reference) continue;
       if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(reference.resolvedUrl)) {
@@ -214,7 +259,9 @@ function collectInlineStyleReferences(html) {
 
       references.push({
         url,
-        source: `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
+        source: sourcePrefix
+          ? `${sourcePrefix}:${lineNumberAt(html, sourceOffsetAt(match.index))}`
+          : `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
       });
     }
   }
@@ -432,6 +479,7 @@ export function checkAssetPaths(app, {
   const references = [
     ...collectHTMLReferences(html),
     ...collectInlineStyleReferences(html),
+    ...collectIframeSrcdocReferences(html),
     ...collectBuiltCodeReferences(outputDirectory).filter(
       (reference) =>
         !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(
