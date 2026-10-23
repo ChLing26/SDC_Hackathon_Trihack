@@ -252,6 +252,42 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("ignores image and font URLs in CSS comments but validates active URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>
+        <div style="background-image: url('/preview/assets/inline.webp'); /* url('/preview/assets/missing-inline.webp') */"></div>
+        <style>/* @import "/preview/assets/missing-import.css"; */ .banner { background: url("/preview/assets/banner.webp"); }</style>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    const stylesPath = join(assetsDirectory, "styles.css");
+    writeFileSync(
+      stylesPath,
+      `/*
+        .example { background-image: url("/preview/assets/missing-image.webp"); }
+        @font-face { src: url("/preview/assets/missing-font.woff2"); }
+      */
+      .hero { background-image: url("/preview/assets/hero.webp"); }`,
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(join(assetsDirectory, "hero.webp"), "");
+    writeFileSync(join(assetsDirectory, "inline.webp"), "");
+    writeFileSync(join(assetsDirectory, "banner.webp"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+
+    writeFileSync(
+      stylesPath,
+      '/* url("/preview/assets/missing-comment.webp") */ .hero { background-image: url("/preview/assets/missing-active.webp"); }',
+    );
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /missing-active\.webp.*assets\/styles\.css/,
+    );
+  });
+
   it("reports wrong prefixes in lazy JavaScript chunks and stylesheets", () => {
     for (const { file, content, expectedSource } of [
       {

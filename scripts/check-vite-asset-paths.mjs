@@ -91,7 +91,10 @@ function collectBuiltCodeReferences(outputDirectory) {
       if (!entry.isFile() || !/\.(?:m?js|css)$/i.test(entry.name)) continue;
 
       const source = relative(outputDirectory, entryPath).split(sep).join("/");
-      const content = readFileSync(entryPath, "utf8");
+      const rawContent = readFileSync(entryPath, "utf8");
+      const content = entry.name.endsWith(".css")
+        ? stripCssComments(rawContent)
+        : rawContent;
       const patterns =
         entry.name.endsWith(".css")
           ? [quotedAssetReferencePattern, cssUrlReferencePattern]
@@ -146,8 +149,9 @@ function collectInlineStyleReferences(html) {
   const styleBlockPattern = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 
   function addStyleReferences(style, sourceOffset) {
+    const commentStrippedStyle = stripCssComments(style);
     for (const pattern of [cssUrlReferencePattern, cssImportReferencePattern]) {
-      for (const match of style.matchAll(pattern)) {
+      for (const match of commentStrippedStyle.matchAll(pattern)) {
         const url = match[1];
         if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
 
@@ -170,6 +174,54 @@ function collectInlineStyleReferences(html) {
   }
 
   return references;
+}
+
+function stripCssComments(css) {
+  let result = "";
+  let quote = "";
+  let escaped = false;
+  let inComment = false;
+
+  for (let index = 0; index < css.length; index += 1) {
+    const character = css[index];
+    const nextCharacter = css[index + 1];
+
+    if (inComment) {
+      if (character === "*" && nextCharacter === "/") {
+        result += "  ";
+        index += 1;
+        inComment = false;
+      } else {
+        result += character === "\n" || character === "\r" ? character : " ";
+      }
+      continue;
+    }
+
+    if (quote) {
+      result += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      result += character;
+    } else if (character === "/" && nextCharacter === "*") {
+      result += "  ";
+      index += 1;
+      inComment = true;
+    } else {
+      result += character;
+    }
+  }
+
+  return result;
 }
 
 function lineNumberAt(text, offset) {
