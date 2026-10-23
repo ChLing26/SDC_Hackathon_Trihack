@@ -265,10 +265,11 @@ function collectHTMLReferences(html, sourcePrefix) {
     const element = tagMatch[1].toLowerCase();
     for (const match of tagMatch[2].matchAll(attributePattern)) {
       const attribute = match[1].toLowerCase();
+      const decodedValue = decodeHtmlCharacterReferences(match[2]).value;
       const urls =
         attribute === "srcset" || attribute === "imagesrcset"
-          ? collectSrcsetURLs(match[2])
-          : [match[2]];
+          ? collectSrcsetURLs(decodedValue)
+          : [decodedValue];
 
       for (const url of urls) {
         if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;

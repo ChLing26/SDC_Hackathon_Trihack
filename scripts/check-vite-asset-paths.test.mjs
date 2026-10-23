@@ -405,6 +405,70 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("decodes character references in HTML resource attributes before checking files", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview&#47;assets&#47;app.js"></script>
+<img src="/preview&sol;assets&sol;missing-src.webp">
+<link rel="preload" as="image" href="/preview&#47;assets&#47;missing-href.webp">
+<img srcset="/preview&#47;assets&#47;missing-srcset.webp 1x">
+<link imagesrcset="/preview&sol;assets&sol;missing-imagesrcset.webp 1x">
+<video poster="/preview&#47;assets&#47;missing-poster.webp"></video>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-src\.webp" in index\.html:2 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-href\.webp" in index\.html:3 link\[href\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-srcset\.webp" in index\.html:4 img\[srcset\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-imagesrcset\.webp" in index\.html:5 link\[imagesrcset\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-poster\.webp" in index\.html:6 video\[poster\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports entity-encoded wrong prefixes and ignores decoded external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview&#47;assets&#47;app.js"></script>
+<img src="&#47;assets&#47;wrong-prefix.webp">
+<img src="https&#58;&#47;&#47;cdn.example.test&#47;remote.webp">
+<img src="data&#58;image&#47;png;base64,AAAA">`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-prefix\.webp" in index\.html:2 img\[src\]/,
+        );
+        assert.doesNotMatch(error.message, /remote\.webp|data:image/);
+        return true;
+      },
+    );
+  });
+
   it("names the app and missing URL when a referenced file was not emitted", () => {
     const { app } = createApp({
       name: "Canvas",
