@@ -4,7 +4,8 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-    "build": "pnpm run typecheck && node scripts/build-vite-apps.mjs && pnpm run check:preview-assets && pnpm --filter '!@workspace/procurement-workspace' --filter '!@workspace/mockup-sandbox' -r --if-present run build",
+    "build": "pnpm run check:preview-config && pnpm run typecheck && node scripts/build-vite-apps.mjs && pnpm run check:preview-assets && pnpm --filter '!@workspace/procurement-workspace' --filter '!@workspace/mockup-sandbox' -r --if-present run build",
+    "check:preview-config": "node scripts/build-vite-apps.mjs --check-only",
     "check:preview-assets": "node scripts/check-vite-asset-paths.mjs",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
