@@ -378,7 +378,8 @@ function isMediaResourceAttribute(element, attribute, tagAttributes) {
 
 function collectInlineStyleReferences(html, sourcePrefix) {
   const references = [];
-  const styleAttributePattern = /\sstyle\s*=\s*(["'])([\s\S]*?)\1/gi;
+  const styleAttributePattern =
+    /\sstyle\s*=\s*(?:"([\s\S]*?)"|'([\s\S]*?)'|([^\s"'`=<>]+))/gi;
   const styleBlockPattern = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 
   function addStyleReferences(style, sourceOffset) {
@@ -417,8 +418,9 @@ function collectInlineStyleReferences(html, sourcePrefix) {
   }
 
   for (const match of html.matchAll(styleAttributePattern)) {
-    const styleOffset = match.index + match[0].indexOf(match[2]);
-    addStyleReferences(match[2], styleOffset);
+    const style = match[1] ?? match[2] ?? match[3];
+    const styleOffset = match.index + match[0].indexOf(style);
+    addStyleReferences(style, styleOffset);
   }
 
   for (const match of html.matchAll(styleBlockPattern)) {

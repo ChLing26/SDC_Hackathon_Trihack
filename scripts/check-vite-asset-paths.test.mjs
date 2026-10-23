@@ -167,6 +167,64 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks local assets in unquoted HTML style attributes", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style=background-image:url(/preview/assets/unquoted.webp)></div>
+<div style=mask-image:url(https://cdn.example.test/mask.svg)></div>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of ["app.js", "unquoted.webp"]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing assets in unquoted HTML style attributes with their HTML line", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style=background:url(/preview/assets/missing-unquoted.webp)></div>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-unquoted\.webp" in index\.html:2/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect preview prefixes in unquoted HTML style attributes with their HTML line", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style=background:url(/assets/wrong-unquoted-prefix.svg)></div>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-unquoted-prefix\.svg" in index\.html:2/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports missing inline-style assets with their HTML line and URL", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
