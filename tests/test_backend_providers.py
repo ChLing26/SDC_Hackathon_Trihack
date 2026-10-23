@@ -3,6 +3,11 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import httpx
+from google import genai
+from google.genai import types
+
+import ai_advisor
 from ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
 from distance import get_distance
 
@@ -29,6 +34,39 @@ class ProviderChecks(unittest.TestCase):
             with self.assertRaisesRegex(GeminiProviderError, "^Gemini advice is temporarily unavailable.$") as failed:
                 get_smart_advice(SUPPLIERS, 30, 3)
             self.assertEqual((failed.exception.category, failed.exception.http_status), ("provider", 502))
+
+    def test_transient_gemini_failure_is_not_retried(self):
+        requests = []
+
+        def unavailable(request):
+            requests.append(request)
+            return httpx.Response(
+                503,
+                json={"error": {"code": 503, "message": "fixture outage"}},
+            )
+
+        sdk_client = genai.Client(
+            api_key="offline-test-key",
+            http_options=types.HttpOptions(
+                timeout=ai_advisor.GEMINI_REQUEST_TIMEOUT_MS,
+                retry_options=types.HttpRetryOptions(
+                    attempts=2,
+                    initial_delay=0,
+                    max_delay=0,
+                    jitter=0,
+                ),
+                client_args={
+                    "transport": httpx.MockTransport(unavailable),
+                },
+            ),
+        )
+        try:
+            with patch.object(ai_advisor, "client", sdk_client):
+                with self.assertRaises(GeminiProviderError):
+                    get_smart_advice(SUPPLIERS, 30, 3)
+            self.assertEqual(len(requests), 1)
+        finally:
+            sdk_client.close()
 
     def test_nonfinite_ai_data_is_rejected_before_network(self):
         with patch("ai_advisor.client") as client:

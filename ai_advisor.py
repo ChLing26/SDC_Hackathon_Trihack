@@ -16,9 +16,22 @@ load_dotenv(dotenv_path=ENV_PATH, override=False)
 
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+GEMINI_REQUEST_TIMEOUT_MS = 15_000
+GEMINI_REQUEST_ATTEMPTS = 1
+
+
+def _gemini_http_options():
+    return types.HttpOptions(
+        timeout=GEMINI_REQUEST_TIMEOUT_MS,
+        retry_options=types.HttpRetryOptions(
+            attempts=GEMINI_REQUEST_ATTEMPTS,
+        ),
+    )
+
+
 # Create the client only when a key is available.
 client = (
-    genai.Client(api_key=API_KEY, http_options=types.HttpOptions(timeout=15000))
+    genai.Client(api_key=API_KEY, http_options=_gemini_http_options())
     if API_KEY else None
 )
 
@@ -217,7 +230,10 @@ def get_smart_advice(
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                http_options=_gemini_http_options(),
+            ),
         )
 
         if not response.text:
