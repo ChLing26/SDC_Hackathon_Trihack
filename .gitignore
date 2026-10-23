@@ -13,6 +13,7 @@ node_modules
 
 # IDEs and editors
 /.idea
+.idea/
 .project
 .classpath
 .c9/
@@ -47,3 +48,17 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# API keys and local secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
