@@ -9,6 +9,36 @@ import { GetProcurementRequestResponse } from "@workspace/api-zod";
 import app from "../app";
 
 const isolated = process.env.PROCUREMENT_ISOLATED_TESTS === "1";
+
+test("retired Tools API endpoints remain unavailable", async () => {
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+  const retiredEndpoints = [
+    { method: "GET", path: "/tools/capabilities" },
+    { method: "GET", path: "/tools/secrets" },
+    { method: "POST", path: "/tools/secrets", body: { name: "EXAMPLE", key: "example" } },
+    { method: "PUT", path: "/tools/secrets/EXAMPLE", body: { key: "example" } },
+    { method: "DELETE", path: "/tools/secrets/EXAMPLE" },
+  ] as const;
+  try {
+    for (const endpoint of retiredEndpoints) {
+      const body = "body" in endpoint ? endpoint.body : undefined;
+      const response = await fetch(base + endpoint.path, {
+        method: endpoint.method,
+        headers: {
+          "x-procureflow-request": "1",
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      assert.equal(response.status, 404, `${endpoint.method} ${endpoint.path}`);
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
 // These tests install deferred constraint triggers. Never run on a project DB.
 test("procurement numeric and commit-order regressions", {
   skip: isolated ? false : "Requires the disposable PostgreSQL test runner",
