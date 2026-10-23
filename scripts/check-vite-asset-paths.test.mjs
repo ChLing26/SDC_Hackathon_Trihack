@@ -53,6 +53,46 @@ describe("Vite preview asset paths", () => {
     assert.match(messages[0], /exist in the build output/);
   });
 
+  it("checks comma-separated srcset and imagesrcset candidates while ignoring external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `
+        <script src="/preview/assets/app.js"></script>
+        <img srcset="/preview/assets/small.webp 1x, /preview/assets/large.webp 2x, https://cdn.example.test/image.webp 3x, data:image/png;base64,AAAA 4x">
+        <link imagesrcset="/preview/assets/preload-small.webp 1x, /preview/assets/preload-large.webp 2x">
+      `,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of [
+      "app.js",
+      "small.webp",
+      "large.webp",
+      "preload-small.webp",
+      "preload-large.webp",
+    ]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports a missing media poster with the app name and offending URL", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<script src="/__mockup/assets/app.js"></script><video poster="/__mockup/assets/missing-poster.webp"></video>',
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /Canvas build output is missing file referenced by URL: "\/__mockup\/assets\/missing-poster\.webp"/,
+    );
+  });
+
   it("names the app and missing URL when a referenced file was not emitted", () => {
     const { app } = createApp({
       name: "Canvas",

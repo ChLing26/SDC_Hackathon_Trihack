@@ -108,6 +108,66 @@ function collectBuiltCodeReferences(outputDirectory) {
   return references;
 }
 
+function collectHTMLReferences(html) {
+  const references = [];
+  const attributePattern =
+    /\b(src|href|srcset|imagesrcset|poster)\s*=\s*["']([^"']+)["']/gi;
+
+  for (const match of html.matchAll(attributePattern)) {
+    const attribute = match[1].toLowerCase();
+    const urls =
+      attribute === "srcset" || attribute === "imagesrcset"
+        ? collectSrcsetURLs(match[2])
+        : [match[2]];
+
+    for (const url of urls) {
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+      if (attribute === "src" || attribute === "href") {
+        if (
+          !/(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
+            url,
+          )
+        ) {
+          continue;
+        }
+      }
+      references.push({ url, source: "index.html" });
+    }
+  }
+
+  return references;
+}
+
+function collectSrcsetURLs(srcset) {
+  const urls = [];
+  let position = 0;
+
+  while (position < srcset.length) {
+    while (position < srcset.length && /[\s,]/.test(srcset[position])) {
+      position += 1;
+    }
+    if (position >= srcset.length) break;
+
+    const urlStart = position;
+    while (position < srcset.length && !/\s/.test(srcset[position])) {
+      position += 1;
+    }
+
+    const candidate = srcset.slice(urlStart, position);
+    const url = candidate.replace(/,+$/, "");
+    if (url) urls.push(url);
+
+    if (candidate.endsWith(",")) continue;
+
+    while (position < srcset.length && srcset[position] !== ",") {
+      position += 1;
+    }
+    if (srcset[position] === ",") position += 1;
+  }
+
+  return urls;
+}
+
 export function checkAssetPaths(app, {
   cwd = process.cwd(),
   log = console.log,
@@ -129,14 +189,7 @@ export function checkAssetPaths(app, {
   }
 
   const references = [
-    ...[...html.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
-      .map((match) => ({ url: match[1], source: "index.html" }))
-      .filter(({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url))
-      .filter(({ url }) =>
-        /(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
-          url,
-        ),
-      ),
+    ...collectHTMLReferences(html),
     ...collectBuiltCodeReferences(outputDirectory).filter(
       ({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url),
     ),
