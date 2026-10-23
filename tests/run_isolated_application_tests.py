@@ -35,6 +35,7 @@ def run():
                 "host": str(socket), "port": "5432",
             }),
             "SESSION_SECRET": "isolated-review-fixture-session-not-a-real-secret",
+            "PROCUREMENT_ISOLATED_TESTS": "1",
         })
         subprocess.run([
             tools["initdb"], "-D", str(data), "-U", "review_fixture",

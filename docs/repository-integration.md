@@ -7,6 +7,10 @@ preserved through `archive/replit/*` references, not reapplied to the applicatio
 
 The current review findings, field mappings, backup availability and remaining
 approval gates are recorded in [backend-integration-review.md](backend-integration-review.md).
+The approved numeric, quote-identity and approval-order fixes and explicit
+cross-service mappings are specified in
+[express-python-data-contract.md](express-python-data-contract.md). This does
+not activate an adapter or change the live database.
 
 ## Preserved application boundaries
 

@@ -30,19 +30,21 @@ router.post("/procurement/requests/:requestId/decision", async (req,res): Promis
   const params = DecideProcurementRequestParams.safeParse(req.params);
   const input = DecideProcurementRequestBody.safeParse(req.body);
   if (!params.success || !input.success) { res.status(400).json({error:"Please provide a valid decision and manager name."}); return; }
-  await db.transaction(async tx => {
+  const result = await db.transaction(async tx => {
     const [row] = await tx.select().from(procurementRecords).where(eq(procurementRecords.id,params.data.requestId)).for("update");
-    if (!row) { res.status(404).json({error:"Request not found"}); return; }
+    if (!row) return { status: 404, data: {error:"Request not found"} };
     const record = GetProcurementRequestResponse.parse(row.data);
-    if (record.status !== "pending_approval") { res.status(400).json({error:"This request has already been reviewed."}); return; }
+    if (record.status !== "pending_approval") return { status: 400, data: {error:"This request has already been reviewed."} };
     const selected = record.offers.find(o => o.id === input.data.offerId);
-    if (input.data.decision === "approved" && !selected) { res.status(400).json({error:"Choose a supplier offer to approve."}); return; }
+    if (input.data.decision === "approved" && !selected) return { status: 400, data: {error:"Choose a supplier offer to approve."} };
     const updated = { ...record, status: input.data.decision, managerName: input.data.managerName, managerComment: input.data.comment ?? "",
       selectedOfferId: selected?.id ?? null, selectedSupplier: selected?.supplierName ?? null,
       invoice: selected && input.data.decision === "approved" ? makeInvoice(record,selected.id,input.data.managerName) : null };
     await tx.update(procurementRecords).set({data: updated}).where(eq(procurementRecords.id,record.id));
-    res.json(DecideProcurementRequestResponse.parse(updated));
+    return { status: 200, data: DecideProcurementRequestResponse.parse(updated) };
   });
+  // A rejected COMMIT reaches the error middleware before any response is sent.
+  res.status(result.status).json(result.data);
 });
 router.get("/procurement/invoices", async (_req,res): Promise<void> => {
   res.json(ListProcurementInvoicesResponse.parse((await listRecords()).flatMap(r => r.invoice ? [r.invoice] : [])));

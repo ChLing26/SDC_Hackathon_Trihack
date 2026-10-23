@@ -189,8 +189,10 @@ export const ListProcurementRequestsResponse = zod.array(ListProcurementRequests
  */
 export const createProcurementRequestBodyItemNameMin = 2;
 
+export const createProcurementRequestBodyQuantityMax = 1000000000;
 
 export const createProcurementRequestBodyBudgetAmountExclusiveMin = 0;
+export const createProcurementRequestBodyBudgetAmountMax = 1000000000000;
 
 export const createProcurementRequestBodyCurrencyMin = 3;
 export const createProcurementRequestBodyCurrencyMax = 3;
@@ -203,8 +205,8 @@ export const createProcurementRequestBodyRequesterNameMin = 2;
 
 export const CreateProcurementRequestBody = zod.object({
   "itemName": zod.string().min(createProcurementRequestBodyItemNameMin),
-  "quantity": zod.number().int().min(1),
-  "budgetAmount": zod.number().gt(createProcurementRequestBodyBudgetAmountExclusiveMin),
+  "quantity": zod.number().int().min(1).max(createProcurementRequestBodyQuantityMax),
+  "budgetAmount": zod.number().gt(createProcurementRequestBodyBudgetAmountExclusiveMin).max(createProcurementRequestBodyBudgetAmountMax),
   "currency": zod.string().min(createProcurementRequestBodyCurrencyMin).max(createProcurementRequestBodyCurrencyMax),
   "requiredDeliveryDate": zod.coerce.date(),
   "deliveryLocation": zod.string().min(createProcurementRequestBodyDeliveryLocationMin),

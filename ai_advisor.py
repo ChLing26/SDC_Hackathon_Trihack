@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from src.backend_numbers import MAX_MONEY, bounded_decimal, checked_total
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -41,6 +42,7 @@ def get_smart_advice(
 
     if not isfinite(budget) or budget < 0:
         raise ValueError("Budget cannot be negative.")
+    bounded_decimal(budget, MAX_MONEY, "Budget")
 
     if not isfinite(max_delivery_days) or max_delivery_days < 0:
         raise ValueError("Delivery days cannot be negative.")
@@ -97,12 +99,13 @@ def get_smart_advice(
                 f"Negative values found for {supplier['name']}."
             )
 
-        total_cost = price + shipping
+        total_cost = checked_total(price, shipping)
 
         processed_suppliers.append({
+            **({"quote_id": supplier["quote_id"]} if "quote_id" in supplier else {}),
             "name": str(supplier["name"]),
-            "product_price_rm": round(price, 2),
-            "shipping_rm": round(shipping, 2),
+            "product_price_rm": price,
+            "shipping_rm": shipping,
             "total_cost_rm": round(total_cost, 2),
             "delivery_days": delivery,
             "distance_km": round(distance, 2),
@@ -157,6 +160,8 @@ def get_smart_advice(
         explain that the quote should be verified before purchase.
     13. Distinguish a warning from a confirmed error. An unusually
         high shipping fee is not automatically proof of fraud or error.
+    14. Reference quote_id when supplied. Supplier names are display labels
+        and may be shared by different quotes; do not merge their warnings.
 
     IMPORTANT
     Total cost = product price + shipping fee.

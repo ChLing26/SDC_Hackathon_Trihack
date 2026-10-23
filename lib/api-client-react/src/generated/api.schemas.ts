@@ -89,9 +89,15 @@ export interface HealthStatus {
 export interface ProcurementRequestInput {
   /** @minLength 2 */
   itemName: string;
-  /** @minimum 1 */
+  /**
+     * @minimum 1
+     * @maximum 1000000000
+     */
   quantity: number;
-  /** @exclusiveMinimum 0 */
+  /**
+     * @maximum 1000000000000
+     * @exclusiveMinimum 0
+     */
   budgetAmount: number;
   /**
      * @minLength 3

@@ -22,6 +22,7 @@ async function buildAll() {
         path.resolve(artifactDir, "src/test/tools-secrets.test.ts"),
         path.resolve(artifactDir, "src/lib/invoice-signature.test.ts"),
         path.resolve(artifactDir, "src/test/invoice-signatures.test.ts"),
+        path.resolve(artifactDir, "src/test/procurement-regressions.test.ts"),
       ] : []),
     ],
     platform: "node",

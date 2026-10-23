@@ -2,12 +2,12 @@ import sqlite3
 import random
 import time
 import requests
-from math import isfinite
 
 from datetime import date, timedelta
 from geopy.geocoders import Nominatim
 
 from src.backend_database import configured_database_path, database_connection
+from src.backend_numbers import checked_quantity, checked_total
 
 DB_NAME = configured_database_path()
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
@@ -362,8 +362,7 @@ def get_supplier_recommendations(
 ) -> list[dict]:
     """Return eligible suppliers as JSON-compatible dictionaries."""
 
-    if not isfinite(quantity) or quantity <= 0:
-        raise ValueError("Quantity must be greater than zero.")
+    checked_quantity(quantity)
 
     with database_connection(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
@@ -390,54 +389,29 @@ def get_supplier_recommendations(
             WHERE d.business_id = ?
               AND p.item_name = ?
               AND d.route_status = 'OK'
-            ORDER BY (o.unit_price * ? + o.delivery_fee) ASC
             """,
-            (business_id, item_name, quantity)
+            (business_id, item_name)
         ).fetchall()
 
     recommendations = []
 
-    for rank, row in enumerate(rows, start=1):
+    for row in rows:
         item = dict(row)
 
-        item["rank"] = rank
         item["quantity"] = quantity
-        item["total_cost_rm"] = round(
-            item["unit_price"] * quantity
-            + item["delivery_fee"],
-            2
+        item["total_cost_rm"] = checked_total(
+            item["unit_price"], item["delivery_fee"], quantity,
         )
 
         recommendations.append(item)
 
+    recommendations.sort(key=lambda item: item["total_cost_rm"])
+    for rank, item in enumerate(recommendations, start=1):
+        item["rank"] = rank
     return recommendations
 
 def recommend_supplier(business_id, item_name, quantity):
-    with database_connection(DB_NAME) as conn:
-        rows = conn.execute("""
-            SELECT
-                s.supplier_name,
-                p.item_name,
-                p.unit,
-                o.unit_price,
-                o.delivery_fee,
-                o.delivery_time,
-                d.road_distance_km,
-                d.driving_duration_min,
-                d.route_status
-            FROM supplier_offers o
-            JOIN suppliers s
-                ON o.supplier_id = s.supplier_id
-            JOIN stationery p
-                ON o.item_id = p.item_id
-            JOIN supplier_distances d
-                ON d.supplier_id = s.supplier_id
-                AND d.business_id = ?
-            WHERE p.item_name = ?
-              AND d.route_status = 'OK'
-            ORDER BY
-                (o.unit_price * ? + o.delivery_fee) ASC
-        """, (business_id, item_name, quantity)).fetchall()
+    rows = get_supplier_recommendations(business_id, item_name, quantity)
 
     if not rows:
         print(
@@ -450,13 +424,11 @@ def recommend_supplier(business_id, item_name, quantity):
     print("-" * 80)
 
     for rank, row in enumerate(rows, start=1):
-        (
-            supplier, item, unit, price, fee,
-            delivery_time,
-            distance, duration, status
-        ) = row
-
-        total_cost = price * quantity + fee
+        supplier, unit = row["supplier_name"], row["unit"]
+        price, fee = row["unit_price"], row["delivery_fee"]
+        delivery_time = row["delivery_time"]
+        distance, duration = row["road_distance_km"], row["driving_duration_min"]
+        status, total_cost = row["route_status"], row["total_cost_rm"]
 
         print(f"\nRank: {rank}")
         print(f"Supplier: {supplier}")
@@ -471,7 +443,7 @@ def recommend_supplier(business_id, item_name, quantity):
 
     print(
         "\nLowest-cost supplier with a valid route:",
-        rows[0][0]
+        rows[0]["supplier_name"]
     )
 
 # Run application

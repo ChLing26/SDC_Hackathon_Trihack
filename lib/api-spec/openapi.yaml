@@ -424,9 +424,11 @@ components:
         quantity:
           type: integer
           minimum: 1
+          maximum: 1000000000
         budgetAmount:
           type: number
           exclusiveMinimum: 0
+          maximum: 1000000000000
         currency:
           type: string
           minLength: 3

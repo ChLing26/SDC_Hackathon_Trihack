@@ -10,6 +10,7 @@ from src.backend_database import (
     configured_database_path, database_connection, require_catalogue,
 )
 from src.backend_security import RequestModel, require_service_auth
+from src.backend_numbers import MAX_QUANTITY, checked_total
 
 DB_NAME = configured_database_path()
 
@@ -97,7 +98,7 @@ app = FastAPI(
 class EmergencyPurchaseRequest(RequestModel):
     business_id: int = Field(gt=0)
     item_name: str = Field(min_length=1, max_length=100)
-    quantity: float = Field(gt=0)
+    quantity: float = Field(gt=0, le=MAX_QUANTITY)
 
     required_delivery_time: time
 
@@ -183,7 +184,6 @@ def create_emergency_purchase(request: EmergencyPurchaseRequest):
           OR d.road_distance_km <= ?
       )
     ORDER BY
-        (o.unit_price * ? + COALESCE(o.delivery_fee, 0)) ASC,
         o.delivery_time ASC,
         d.road_distance_km ASC
 """, (
@@ -192,7 +192,6 @@ def create_emergency_purchase(request: EmergencyPurchaseRequest):
     required_time,
     request.max_distance_km,
     request.max_distance_km,
-    request.quantity,
 )).fetchall()
 
         if not candidates:
@@ -206,12 +205,17 @@ def create_emergency_purchase(request: EmergencyPurchaseRequest):
             )
 
         # Automatically select the lowest-total-cost eligible offer.
-        chosen = candidates[0]
-
-        total_cost = (
-            chosen["unit_price"] * request.quantity
-            + chosen["delivery_fee"]
-        )
+        try:
+            totals = [
+                (checked_total(row["unit_price"], row["delivery_fee"], request.quantity), row)
+                for row in candidates
+            ]
+        except ValueError:
+            raise HTTPException(
+                409, "Supplier quote amounts exceed supported numeric limits.",
+            ) from None
+        # SQL already orders delivery/distance ties; min preserves that order.
+        total_cost, chosen = min(totals, key=lambda candidate: candidate[0])
 
         # Save a quote snapshot and require approval.
         cursor = conn.execute("""

@@ -117,6 +117,12 @@ either source for a real purchase.
 
 ## Remaining risks and blockers
 
+The approved bug-fix phase addresses numeric overflow, name-based warning
+association and approval response-before-COMMIT ordering. See
+[express-python-data-contract.md](express-python-data-contract.md) for the
+implemented boundaries and the still-unimplemented adapter contract. The original
+diagnostics/test table below records the **pre-fix review**, not current failures.
+
 ### Must resolve before activating an adapter
 
 - Original history backups are unavailable/unverified, even though local Git
@@ -128,19 +134,20 @@ either source for a real purchase.
 - Emergency purchasing filters time-of-day/distance and selects lowest total
   cost. It does not enforce Express's budget or full calendar deadline, and has
   no verified manager-role boundary. Do not use it for live approval.
-- Finite numeric inputs can still overflow when added/multiplied. An offline
+- **Resolved by bounded decimal validation:** finite numeric inputs could overflow when added/multiplied. An offline
   review probe with `product_price_rm=shipping_rm=1e308` produced a non-finite
   calculated total: expected finite `True`, actual `False`. Such a result is not
   safe for JSON or financial decisions. Add bounded arithmetic validation before
-  activation; this review does not silently change numeric business rules.
-- Advice warnings are associated by supplier **name**. A probe with two equal
+  activation; the approved fix now rejects these inputs and unsafe totals.
+- **Resolved by unique quote IDs:** advice warnings were associated by supplier **name**. A probe with two equal
   names, only one with a mismatched total, produced warning counts `[1, 1]`
-  instead of `[1, 0]`. Introduce stable quote identifiers and regression tests.
-- Express approval sends its HTTP response inside the transaction callback,
+  instead of `[1, 0]`. Results/warnings now use quote IDs and reject duplicate IDs.
+- **Resolved by post-commit responses:** Express approval sent its HTTP response inside the transaction callback,
   before commit completes. Row locks/pending-state checks are present, but a
   commit failure could follow a premature success response. Existing signature
-  tests explicitly wait for the approval lock; add a commit-fault/no-premature-
-  success test before relying on cross-service approval completion.
+  tests explicitly waited for the approval lock. New isolated regressions use
+  real deferred PostgreSQL triggers to fail or block COMMIT, proving rollback
+  and absence of premature success.
 - Signed invoice fields/evidence must not change following re-ranking or quote
   refresh. Invoices remain internal records, not tax-authority-validated
   e-invoices or certificate-backed signatures.
