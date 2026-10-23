@@ -187,6 +187,8 @@ function collectHTMLReferences(html, sourcePrefix) {
 
       for (const url of urls) {
         if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+        const attributeOffset =
+          tagMatch.index + tagMatch[0].indexOf(tagMatch[2]) + match.index;
         if (
           attribute === "src" ||
           attribute === "href" ||
@@ -207,9 +209,7 @@ function collectHTMLReferences(html, sourcePrefix) {
 
         references.push({
           url,
-          source: sourcePrefix
-            ? `${sourcePrefix}:${lineNumberAt(html, tagMatch.index)}`
-            : "index.html",
+          source: `${sourcePrefix ?? "index.html"}:${lineNumberAt(html, attributeOffset)} ${element}[${attribute}]`,
         });
       }
     }

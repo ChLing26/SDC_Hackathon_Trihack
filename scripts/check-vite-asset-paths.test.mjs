@@ -354,14 +354,54 @@ describe("Vite preview asset paths", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",
       basePath: "/__mockup/",
-      html: '<script src="/__mockup/assets/app.js"></script><video poster="/__mockup/assets/missing-poster.webp"></video>',
+      html: `<script src="/__mockup/assets/app.js"></script>
+<video poster="/__mockup/assets/missing-poster.webp"></video>`,
     });
     mkdirSync(join(outputDirectory, "assets"), { recursive: true });
     writeFileSync(join(outputDirectory, "assets", "app.js"), "");
 
     assert.throws(
       () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
-      /Canvas build output is missing file referenced by URL: "\/__mockup\/assets\/missing-poster\.webp"/,
+      (error) => {
+        assert.match(error.message, /Canvas build output is missing file referenced by URL/);
+        assert.match(
+          error.message,
+          /"\/__mockup\/assets\/missing-poster\.webp" in index\.html:2 video\[poster\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports the HTML line, element, and attribute for missing image source candidates", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<img src="/preview/assets/missing-image.webp">
+<img
+  srcset="/preview/assets/present.webp 1x, /preview/assets/missing-candidate.webp 2x">
+<link imagesrcset="/preview/assets/missing-preload-candidate.webp 2x">`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(join(outputDirectory, "assets", "present.webp"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-image\.webp" in index\.html:2 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-candidate\.webp" in index\.html:4 img\[srcset\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-preload-candidate\.webp" in index\.html:5 link\[imagesrcset\]/,
+        );
+        return true;
+      },
     );
   });
 
