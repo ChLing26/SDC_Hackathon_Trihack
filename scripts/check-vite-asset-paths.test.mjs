@@ -408,6 +408,92 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks static srcdoc strings assigned by JavaScript and ignores external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.srcdoc = \`<img src="/preview/assets/generated-frame.webp">
+<link rel="stylesheet" href="/preview/assets/generated-frame.css">
+<img src="https://cdn.example.test/external.webp">
+<img src="data:image/png;base64,AAAA">\`;
+frame.setAttribute("srcdoc", '<img src="assets/relative-frame.webp">');`,
+    );
+    for (const file of [
+      "generated-frame.webp",
+      "generated-frame.css",
+      "relative-frame.webp",
+    ]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing assets in JavaScript-generated srcdoc with the source location and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.srcdoc = '<img src="/preview/assets/missing-generated.webp"><style>@import "/preview/assets/missing-generated.css"; .hero { background: url("/preview/assets/missing-generated.svg"); }</style>';`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-generated\.webp" in assets\/app\.js:2 iframe\[srcdoc\]:1 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-generated\.css" in assets\/app\.js:2 iframe\[srcdoc\]:1/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-generated\.svg" in assets\/app\.js:2 iframe\[srcdoc\]:1/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect prefixes in JavaScript-generated srcdoc with the source location and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><img src="https://cdn.example.test/ignored.webp"><img src="data:image/png;base64,AAAA">');`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-generated-prefix\.webp" in assets\/app\.js:2 iframe\[srcdoc\]:1 img\[src\]/,
+        );
+        assert.doesNotMatch(error.message, /ignored\.webp|data:image/);
+        return true;
+      },
+    );
+  });
+
   it("checks local assets in same-origin iframe pages relative to the iframe URL", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>

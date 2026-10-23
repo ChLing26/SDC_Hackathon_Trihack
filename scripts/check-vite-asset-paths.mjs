@@ -89,7 +89,7 @@ function readManifestPaths(manifestPath, cwd = process.cwd()) {
   return { basePath, assetPrefix: `${basePath}assets/` };
 }
 
-function collectBuiltCodeReferences(outputDirectory) {
+function collectBuiltCodeReferences(outputDirectory, basePath) {
   const references = [];
   const pendingDirectories = [outputDirectory];
 
@@ -111,6 +111,9 @@ function collectBuiltCodeReferences(outputDirectory) {
         ? stripCssComments(rawContent)
         : stripJavaScriptComments(rawContent);
       const seenUrls = new Set();
+      const embeddedDocuments = isStylesheet
+        ? []
+        : collectStaticJavaScriptSrcdoc(content, source);
 
       if (isStylesheet) {
         for (const match of content.matchAll(cssUrlReferencePattern)) {
@@ -122,6 +125,14 @@ function collectBuiltCodeReferences(outputDirectory) {
       }
 
       for (const match of content.matchAll(quotedAssetReferencePattern)) {
+        if (
+          embeddedDocuments.some(
+            (document) =>
+              match.index >= document.start && match.index < document.end,
+          )
+        ) {
+          continue;
+        }
         if (seenUrls.has(match[1])) continue;
         seenUrls.add(match[1]);
         references.push({ url: match[1], source });
@@ -131,6 +142,10 @@ function collectBuiltCodeReferences(outputDirectory) {
         for (const match of content.matchAll(quotedLocalURLPattern)) {
           const url = match[2];
           if (
+            embeddedDocuments.some(
+              (document) =>
+                match.index >= document.start && match.index < document.end,
+            ) ||
             seenUrls.has(url) ||
             !isExtensionlessMediaURL(url) ||
             (!isMediaDirectoryURL(url) &&
@@ -142,6 +157,27 @@ function collectBuiltCodeReferences(outputDirectory) {
           }
           seenUrls.add(url);
           references.push({ url, source });
+        }
+
+        const resolveFrom = new URL(basePath, "http://preview.local").href;
+        for (const document of embeddedDocuments) {
+          references.push(
+            ...collectHTMLReferences(
+              document.html,
+              document.source,
+              resolveFrom,
+            ),
+            ...collectInlineStyleReferences(
+              document.html,
+              document.source,
+              resolveFrom,
+            ),
+            ...collectIframeSrcdocReferences(
+              document.html,
+              document.source,
+              resolveFrom,
+            ),
+          );
         }
       }
     }
@@ -349,6 +385,186 @@ function collectIframeSrcdocReferences(
   }
 
   return references;
+}
+
+function collectStaticJavaScriptSrcdoc(source, codeSource) {
+  const codeMask = maskJavaScriptLiterals(source);
+  const assignmentPatterns = [
+    /(?:\.\s*srcdoc\s*=\s*|\[\s*["']srcdoc["']\s*\]\s*=\s*)/gi,
+    /\.\s*setAttribute\s*\(\s*["']srcdoc["']\s*,\s*/gi,
+  ];
+  const documents = [];
+  const seenAssignments = new Set();
+
+  for (const pattern of assignmentPatterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (
+        seenAssignments.has(match.index) ||
+        /\s/.test(codeMask[match.index] ?? " ")
+      ) {
+        continue;
+      }
+      seenAssignments.add(match.index);
+
+      const valueStart = match.index + match[0].length;
+      const literal = parseStaticJavaScriptString(source, valueStart);
+      if (!literal) continue;
+
+      const line = lineNumberAt(source, match.index);
+      documents.push({
+        html: literal.value,
+        start: valueStart,
+        end: literal.end,
+        source: `${codeSource}:${line} iframe[srcdoc]`,
+      });
+    }
+  }
+
+  return documents;
+}
+
+function maskJavaScriptLiterals(source) {
+  const result = source.split("");
+  const mask = (start, end) => {
+    for (let index = start; index < end; index += 1) {
+      if (source[index] !== "\n" && source[index] !== "\r") result[index] = " ";
+    }
+  };
+
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === "'" || character === '"') {
+      const quote = character;
+      const start = index;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") {
+          index += 2;
+        } else if (source[index] === quote) {
+          index += 1;
+          break;
+        } else {
+          index += 1;
+        }
+      }
+      mask(start, Math.min(index, source.length));
+    } else if (character === "`") {
+      const start = index;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") {
+          index += 2;
+        } else if (source[index] === "`") {
+          index += 1;
+          break;
+        } else {
+          index += 1;
+        }
+      }
+      mask(start, Math.min(index, source.length));
+    } else {
+      index += 1;
+    }
+  }
+
+  return result.join("");
+}
+
+function parseStaticJavaScriptString(source, start) {
+  let position = start;
+  while (/\s/.test(source[position] ?? "") && position < source.length) {
+    position += 1;
+  }
+
+  const quote = source[position];
+  if (quote !== "'" && quote !== '"' && quote !== "`") return null;
+
+  const contentStart = position + 1;
+  position = contentStart;
+  while (position < source.length) {
+    if (source[position] === "\\") {
+      position += 2;
+    } else if (
+      quote === "`" &&
+      source[position] === "$" &&
+      source[position + 1] === "{"
+    ) {
+      return null;
+    } else if (source[position] === quote) {
+      return {
+        value: decodeJavaScriptString(source.slice(contentStart, position)),
+        end: position + 1,
+      };
+    } else if (
+      quote !== "`" &&
+      (source[position] === "\n" || source[position] === "\r")
+    ) {
+      return null;
+    } else {
+      position += 1;
+    }
+  }
+
+  return null;
+}
+
+function decodeJavaScriptString(value) {
+  const simpleEscapes = {
+    0: "\0",
+    b: "\b",
+    f: "\f",
+    n: "\n",
+    r: "\r",
+    t: "\t",
+    v: "\v",
+  };
+  let decoded = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "\\") {
+      decoded += value[index];
+      continue;
+    }
+
+    const escaped = value[++index];
+    if (escaped === undefined) break;
+    if (escaped === "\n") continue;
+    if (escaped === "\r") {
+      if (value[index + 1] === "\n") index += 1;
+      continue;
+    }
+
+    if (Object.hasOwn(simpleEscapes, escaped)) {
+      decoded += simpleEscapes[escaped];
+    } else if (
+      escaped === "x" &&
+      /^[\da-fA-F]{2}$/.test(value.slice(index + 1, index + 3))
+    ) {
+      decoded += String.fromCharCode(
+        Number.parseInt(value.slice(index + 1, index + 3), 16),
+      );
+      index += 2;
+    } else if (escaped === "u") {
+      const bracedUnicode = value.slice(index + 1).match(/^\{([\da-fA-F]+)\}/);
+      if (bracedUnicode) {
+        const codePoint = Number.parseInt(bracedUnicode[1], 16);
+        if (codePoint <= 0x10ffff) decoded += String.fromCodePoint(codePoint);
+        else decoded += "\ufffd";
+        index += bracedUnicode[0].length;
+      } else {
+        const unicode = value.slice(index + 1, index + 5);
+        if (/^[\da-fA-F]{4}$/.test(unicode)) {
+          decoded += String.fromCharCode(Number.parseInt(unicode, 16));
+          index += 4;
+        } else {
+          decoded += "u";
+        }
+      }
+    } else {
+      decoded += escaped;
+    }
+  }
+  return decoded;
 }
 
 function collectIframePageReferences(
@@ -886,7 +1102,7 @@ export function checkAssetPaths(app, {
       basePath,
       documentURL: new URL(basePath, "http://preview.local").href,
     }),
-    ...collectBuiltCodeReferences(outputDirectory).filter(
+    ...collectBuiltCodeReferences(outputDirectory, basePath).filter(
       (reference) =>
         !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(
           reference.resolvedUrl ?? reference.url,
