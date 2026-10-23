@@ -97,7 +97,9 @@ function collectBuiltCodeReferences(outputDirectory) {
       const source = relative(outputDirectory, entryPath).split(sep).join("/");
       const rawContent = readFileSync(entryPath, "utf8");
       const isStylesheet = /\.css$/i.test(entry.name);
-      const content = isStylesheet ? stripCssComments(rawContent) : rawContent;
+      const content = isStylesheet
+        ? stripCssComments(rawContent)
+        : stripJavaScriptComments(rawContent);
       const seenUrls = new Set();
 
       if (isStylesheet) {
@@ -420,6 +422,107 @@ function stripCssComments(css) {
   }
 
   return result;
+}
+
+function stripJavaScriptComments(source) {
+  const result = source.split("");
+  const contexts = [{ type: "code", templateExpression: false, braceDepth: 0 }];
+  const maskComment = (start, end) => {
+    for (let index = start; index < end; index += 1) {
+      if (source[index] !== "\n" && source[index] !== "\r") result[index] = " ";
+    }
+  };
+
+  let index = 0;
+  while (index < source.length) {
+    const context = contexts.at(-1);
+    const character = source[index];
+    const nextCharacter = source[index + 1];
+
+    if (context.type === "template") {
+      if (character === "\\") {
+        index += 2;
+      } else if (character === "`") {
+        contexts.pop();
+        index += 1;
+      } else if (character === "$" && nextCharacter === "{") {
+        contexts.push({
+          type: "code",
+          templateExpression: true,
+          braceDepth: 0,
+        });
+        index += 2;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      const quote = character;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") {
+          index += 2;
+        } else if (source[index] === quote) {
+          index += 1;
+          break;
+        } else {
+          index += 1;
+        }
+      }
+      continue;
+    }
+
+    if (character === "`") {
+      contexts.push({ type: "template" });
+      index += 1;
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "/") {
+      const start = index;
+      index += 2;
+      while (
+        index < source.length &&
+        source[index] !== "\n" &&
+        source[index] !== "\r"
+      ) {
+        index += 1;
+      }
+      maskComment(start, index);
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "*") {
+      const start = index;
+      index += 2;
+      while (
+        index < source.length &&
+        !(source[index] === "*" && source[index + 1] === "/")
+      ) {
+        index += 1;
+      }
+      index = Math.min(source.length, index + 2);
+      maskComment(start, index);
+      continue;
+    }
+
+    if (context.templateExpression) {
+      if (character === "{") {
+        context.braceDepth += 1;
+      } else if (character === "}") {
+        if (context.braceDepth === 0) {
+          contexts.pop();
+        } else {
+          context.braceDepth -= 1;
+        }
+      }
+    }
+    index += 1;
+  }
+
+  return result.join("");
 }
 
 function lineNumberAt(text, offset) {

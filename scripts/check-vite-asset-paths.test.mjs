@@ -406,6 +406,64 @@ describe("Vite preview asset paths", () => {
     assert.match(messages[0], /use configured prefix/);
   });
 
+  it("ignores missing asset paths in JavaScript comments without treating string contents as comments", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `// import("/preview/assets/missing-line.js");
+      /* import("/preview/assets/missing-block.js"); */
+      const commentMarker = "/*";
+      import("/preview/assets/present.js");`,
+    );
+    writeFileSync(join(assetsDirectory, "present.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("still reports active missing JavaScript asset references", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `/* import("/preview/assets/missing-comment.js"); */
+      const commentMarker = "/*";
+      import("/preview/assets/missing-active.js");`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /missing-active\.js.*assets\/app\.js/,
+    );
+  });
+
+  it("preserves JavaScript template strings and strips comments inside their expressions", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const example = \`// ignored text
+        \${/* import("/preview/assets/missing-expression.js"); */ "/preview/assets/present.js"}\`;
+      import("/preview/assets/present.js");`,
+    );
+    writeFileSync(join(assetsDirectory, "present.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("accepts present local images and fonts referenced by linked CSS", () => {
     const { app, outputDirectory } = createApp({
       html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
