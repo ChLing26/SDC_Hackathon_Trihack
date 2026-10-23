@@ -50,3 +50,15 @@ tests as blocked if isolation is unavailable. Do not use the live preview for a
 browser journey that creates approvals/signatures while this restriction is in
 effect. Propose an isolated browser environment instead of silently relaxing the
 data boundary.
+
+For browser-only verification, a fresh browser context with every API request
+fulfilled from fixtures is an alternative to starting a database-backed server.
+Block unexpected API calls rather than passing them through, disable service
+workers, and mock the identity response before the first navigation.
+
+**Why:** Signed-in presentation can be tested without creating even a temporary
+account or session in the existing database. This verifies the UI contract,
+not real authentication, provider calculations, or persistence.
+
+**How to apply:** Keep backend services out of a fixture-only browser run. Use a
+disposable separate database only when the test actually needs backend behavior.
