@@ -73,7 +73,72 @@ describe("Vite preview asset paths", () => {
 
     assert.throws(
       () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
-      /ProcureFlow build output is missing file referenced by URL/,
+      (error) => {
+        assert.match(error.message, /\/preview\/assets\/%2e%2e\/%2e%2e\/outside\.js/);
+        assert.match(
+          error.message,
+          /do not use configured base path|build output is missing file/,
+        );
+        return true;
+      },
     );
+  });
+
+  it("checks lazy-loaded JavaScript and CSS asset URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      'import("./lazy.js"); import("/preview/assets/secondary.js");',
+    );
+    writeFileSync(join(assetsDirectory, "lazy.js"), "");
+    writeFileSync(join(assetsDirectory, "secondary.js"), "");
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '@font-face{src:url("/preview/assets/font.woff2")} .hero{background:url(/preview/assets/hero.svg)}',
+    );
+    writeFileSync(join(assetsDirectory, "font.woff2"), "");
+    writeFileSync(join(assetsDirectory, "hero.svg"), "");
+    const messages = [];
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: (message) => messages.push(message) }),
+    );
+    assert.match(messages[0], /use configured prefix/);
+  });
+
+  it("reports wrong prefixes in lazy JavaScript chunks and stylesheets", () => {
+    for (const { file, content, expectedSource } of [
+      {
+        file: "lazy.js",
+        content: 'import("/assets/lazy.js");',
+        expectedSource: /assets\/lazy\.js/,
+      },
+      {
+        file: "styles.css",
+        content: ".hero{background:url(/assets/hero.svg)}",
+        expectedSource: /assets\/styles\.css/,
+      },
+    ]) {
+      const { app, outputDirectory } = createApp({
+        html: '<script src="/preview/assets/app.js"></script>',
+      });
+      const assetsDirectory = join(outputDirectory, "assets");
+      mkdirSync(assetsDirectory, { recursive: true });
+      writeFileSync(join(assetsDirectory, "app.js"), "");
+      writeFileSync(join(assetsDirectory, file), content);
+
+      assert.throws(
+        () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+        (error) => {
+          assert.match(error.message, /configured base path "\/preview\/"/);
+          assert.match(error.message, expectedSource);
+          return true;
+        },
+      );
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,17 @@ const apps = [
     indexPath: "artifacts/mockup-sandbox/dist/index.html",
   },
 ];
+
+const assetExtensions =
+  "m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot";
+const quotedAssetReferencePattern = new RegExp(
+  String.raw`["'\x60]((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["'\x60]`,
+  "gi",
+);
+const cssUrlReferencePattern = new RegExp(
+  String.raw`url\(\s*["']?((?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["']?\s*\)`,
+  "gi",
+);
 
 function readManifestPaths(manifestPath, cwd = process.cwd()) {
   const manifest = readFileSync(resolve(cwd, manifestPath), "utf8");
@@ -62,6 +73,41 @@ function readManifestPaths(manifestPath, cwd = process.cwd()) {
   return { basePath, assetPrefix: `${basePath}assets/` };
 }
 
+function collectBuiltCodeReferences(outputDirectory) {
+  const references = [];
+  const pendingDirectories = [outputDirectory];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+        continue;
+      }
+
+      if (!entry.isFile() || !/\.(?:m?js|css)$/i.test(entry.name)) continue;
+
+      const source = relative(outputDirectory, entryPath).split(sep).join("/");
+      const content = readFileSync(entryPath, "utf8");
+      const patterns =
+        entry.name.endsWith(".css")
+          ? [quotedAssetReferencePattern, cssUrlReferencePattern]
+          : [quotedAssetReferencePattern];
+      const seenUrls = new Set();
+      for (const pattern of patterns) {
+        for (const match of content.matchAll(pattern)) {
+          if (seenUrls.has(match[1])) continue;
+          seenUrls.add(match[1]);
+          references.push({ url: match[1], source });
+        }
+      }
+    }
+  }
+
+  return references;
+}
+
 export function checkAssetPaths(app, {
   cwd = process.cwd(),
   log = console.log,
@@ -82,10 +128,19 @@ export function checkAssetPaths(app, {
     throw error;
   }
 
-  const references = [...html.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
-    .map((match) => match[1])
-    .filter((url) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url))
-    .filter((url) => /(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:js|mjs|css|wasm|png|jpe?g|gif|svg|webp|woff2?|ttf|otf)(?:[?#]|$)/i.test(url));
+  const references = [
+    ...[...html.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
+      .map((match) => ({ url: match[1], source: "index.html" }))
+      .filter(({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url))
+      .filter(({ url }) =>
+        /(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
+          url,
+        ),
+      ),
+    ...collectBuiltCodeReferences(outputDirectory).filter(
+      ({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url),
+    ),
+  ];
 
   if (references.length === 0) {
     throw new Error(
@@ -93,28 +148,36 @@ export function checkAssetPaths(app, {
     );
   }
 
-  const invalidReferences = references.filter((url) => !url.startsWith(basePath));
+  const invalidReferences = references.filter(
+    (reference) => !resolveReferenceURL(reference, basePath).pathname.startsWith(basePath),
+  );
   if (invalidReferences.length > 0) {
     throw new Error(
-      `${app.name} local assets do not use configured base path "${basePath}". Invalid URL${invalidReferences.length === 1 ? "" : "s"}: ${invalidReferences.join(", ")}`,
+      `${app.name} local assets do not use configured base path "${basePath}". Invalid URL${invalidReferences.length === 1 ? "" : "s"}: ${invalidReferences.map(formatReference).join(", ")}`,
     );
   }
 
-  if (!references.some((url) => url.startsWith(assetPrefix))) {
+  if (
+    !references.some(
+      (reference) => resolveReferenceURL(reference, basePath).pathname.startsWith(assetPrefix),
+    )
+  ) {
     throw new Error(
       `${app.name} build output has no bundled assets under configured prefix "${assetPrefix}".`,
     );
   }
 
   const missingReferences = [];
-  for (const url of references) {
+  for (const reference of references) {
+    const { url, source } = reference;
     let assetPath;
     try {
-      const pathname = new URL(url, "http://preview.local").pathname;
-      const decodedPath = decodeURIComponent(pathname);
+      const decodedPath = decodeURIComponent(
+        resolveReferenceURL(reference, basePath).pathname,
+      );
       assetPath = resolve(outputDirectory, decodedPath.slice(basePath.length));
     } catch {
-      missingReferences.push(url);
+      missingReferences.push(reference);
       continue;
     }
 
@@ -129,17 +192,29 @@ export function checkAssetPaths(app, {
       !existsSync(assetPath) ||
       !statSync(assetPath).isFile()
     ) {
-      missingReferences.push(url);
+      missingReferences.push({ url, source });
     }
   }
 
   if (missingReferences.length > 0) {
     throw new Error(
-      `${app.name} build output is missing file${missingReferences.length === 1 ? "" : "s"} referenced by URL${missingReferences.length === 1 ? "" : "s"}: ${missingReferences.map((url) => `"${url}"`).join(", ")}`,
+      `${app.name} build output is missing file${missingReferences.length === 1 ? "" : "s"} referenced by URL${missingReferences.length === 1 ? "" : "s"}: ${missingReferences.map(formatReference).join(", ")}`,
     );
   }
 
   log(`${app.name} assets use configured prefix "${assetPrefix}" and exist in the build output.`);
+}
+
+function resolveReferenceURL({ url, source }, basePath) {
+  const sourceBase =
+    source === "index.html" || url.startsWith("assets/")
+      ? `http://preview.local${basePath}`
+      : `http://preview.local${basePath}${source}`;
+  return new URL(url, sourceBase);
+}
+
+function formatReference({ url, source }) {
+  return source === "index.html" ? `"${url}"` : `"${url}" in ${source}`;
 }
 
 export function checkAllAssetPaths({ appConfigs = apps, cwd, log } = {}) {
