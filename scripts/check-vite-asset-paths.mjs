@@ -255,7 +255,7 @@ function isMediaDirectoryURL(url) {
   }
 }
 
-function collectHTMLReferences(html, sourcePrefix) {
+function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
   const references = [];
   const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const attributePattern =
@@ -296,6 +296,7 @@ function collectHTMLReferences(html, sourcePrefix) {
         references.push({
           url,
           source: `${sourcePrefix ?? "index.html"}:${lineNumberAt(html, attributeOffset)} ${element}[${attribute}]`,
+          ...(resolveFrom ? { resolveFrom } : {}),
         });
       }
     }
@@ -304,7 +305,11 @@ function collectHTMLReferences(html, sourcePrefix) {
   return references;
 }
 
-function collectIframeSrcdocReferences(html, documentSource = "index.html") {
+function collectIframeSrcdocReferences(
+  html,
+  documentSource = "index.html",
+  resolveFrom,
+) {
   const references = [];
   const iframeStartPattern = /<iframe\b/gi;
 
@@ -333,10 +338,151 @@ function collectIframeSrcdocReferences(html, documentSource = "index.html") {
     const iframeSource =
       `${documentSource}:${lineNumberAt(html, tagStart)} iframe[srcdoc]`;
     references.push(
-      ...collectHTMLReferences(embeddedHtml, iframeSource),
-      ...collectInlineStyleReferences(embeddedHtml, iframeSource),
-      ...collectIframeSrcdocReferences(embeddedHtml, iframeSource),
+      ...collectHTMLReferences(embeddedHtml, iframeSource, resolveFrom),
+      ...collectInlineStyleReferences(embeddedHtml, iframeSource, resolveFrom),
+      ...collectIframeSrcdocReferences(
+        embeddedHtml,
+        iframeSource,
+        resolveFrom,
+      ),
     );
+  }
+
+  return references;
+}
+
+function collectIframePageReferences(
+  html,
+  { outputDirectory, basePath },
+) {
+  const references = [];
+  const pendingDocuments = [
+    {
+      html,
+      source: "index.html",
+      url: new URL(basePath, "http://preview.local"),
+      includeReferences: false,
+    },
+  ];
+  const visitedDocuments = new Set([resolve(outputDirectory, "index.html")]);
+
+  while (pendingDocuments.length > 0) {
+    const document = pendingDocuments.pop();
+    if (document.includeReferences) {
+      references.push(
+        ...collectHTMLReferences(
+          document.html,
+          document.source,
+          document.url.href,
+        ),
+        ...collectInlineStyleReferences(
+          document.html,
+          document.source,
+          document.url.href,
+        ),
+        ...collectIframeSrcdocReferences(
+          document.html,
+          document.source,
+          document.url.href,
+        ),
+      );
+    }
+
+    for (const match of document.html.matchAll(/<iframe\b/gi)) {
+      const tagStart = match.index;
+      let quote;
+      let tagEnd = tagStart + match[0].length;
+
+      for (; tagEnd < document.html.length; tagEnd += 1) {
+        const character = document.html[tagEnd];
+        if (quote) {
+          if (character === quote) quote = undefined;
+        } else if (character === '"' || character === "'") {
+          quote = character;
+        } else if (character === ">") {
+          break;
+        }
+      }
+      if (tagEnd >= document.html.length) continue;
+
+      const tag = document.html.slice(tagStart, tagEnd + 1);
+      const srcMatch = tag.match(
+        /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/i,
+      );
+      if (!srcMatch) continue;
+
+      const url = decodeHtmlCharacterReferences(
+        srcMatch[1] ?? srcMatch[2] ?? srcMatch[3] ?? "",
+      ).value;
+      if (!url || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+
+      let pageURL;
+      try {
+        pageURL = new URL(url, document.url);
+      } catch {
+        continue;
+      }
+      if (pageURL.origin !== "http://preview.local") continue;
+      const isHTMLPage =
+        /\.html?$/i.test(pageURL.pathname) || pageURL.pathname.endsWith("/");
+      if (!isHTMLPage) continue;
+
+      const source =
+        `${document.source}:${lineNumberAt(document.html, tagStart)} iframe[src]`;
+      const reference = { url, source, resolveFrom: document.url.href };
+      references.push(reference);
+
+      if (!pageURL.pathname.startsWith(basePath)) continue;
+
+      let decodedPath;
+      try {
+        decodedPath = decodeURIComponent(pageURL.pathname);
+      } catch {
+        continue;
+      }
+
+      const relativePath = decodedPath.slice(basePath.length);
+      let pagePath = resolve(outputDirectory, relativePath);
+      if (pageURL.pathname.endsWith("/")) {
+        pagePath = resolve(pagePath, "index.html");
+      }
+      const relativePagePath = relative(outputDirectory, pagePath);
+      if (
+        relativePagePath === ".." ||
+        relativePagePath.startsWith(`..${sep}`) ||
+        resolve(outputDirectory, relativePagePath) !== pagePath ||
+        !existsSync(pagePath)
+      ) {
+        continue;
+      }
+
+      try {
+        if (!statSync(pagePath).isFile()) continue;
+        const realPagePath = realpathSync(pagePath);
+        const realRelativePagePath = relative(
+          realpathSync(outputDirectory),
+          realPagePath,
+        );
+        if (
+          realRelativePagePath === ".." ||
+          realRelativePagePath.startsWith(`..${sep}`)
+        ) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      const documentKey = resolve(pagePath);
+      if (visitedDocuments.has(documentKey)) continue;
+      visitedDocuments.add(documentKey);
+      pendingDocuments.push({
+        html: readFileSync(pagePath, "utf8"),
+        source: `iframe page ${relativePagePath.split(sep).join("/")}`,
+        url: pageURL,
+        includeReferences: true,
+      });
+    }
   }
 
   return references;
@@ -376,7 +522,7 @@ function isMediaResourceAttribute(element, attribute, tagAttributes) {
   );
 }
 
-function collectInlineStyleReferences(html, sourcePrefix) {
+function collectInlineStyleReferences(html, sourcePrefix, resolveFrom) {
   const references = [];
   const styleAttributePattern =
     /\sstyle\s*=\s*(?:"([\s\S]*?)"|'([\s\S]*?)'|([^\s"'`=<>]+))/gi;
@@ -399,7 +545,7 @@ function collectInlineStyleReferences(html, sourcePrefix) {
       if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(reference.resolvedUrl)) {
         continue;
       }
-      references.push(reference);
+      references.push(resolveFrom ? { ...reference, resolveFrom } : reference);
     }
 
     for (const match of commentStrippedStyle.matchAll(
@@ -413,6 +559,7 @@ function collectInlineStyleReferences(html, sourcePrefix) {
         source: sourcePrefix
           ? `${sourcePrefix}:${lineNumberAt(html, sourceOffsetAt(match.index))}`
           : `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
+        ...(resolveFrom ? { resolveFrom } : {}),
       });
     }
   }
@@ -734,6 +881,11 @@ export function checkAssetPaths(app, {
     ...collectHTMLReferences(html),
     ...collectInlineStyleReferences(html),
     ...collectIframeSrcdocReferences(html),
+    ...collectIframePageReferences(html, {
+      outputDirectory,
+      basePath,
+      documentURL: new URL(basePath, "http://preview.local").href,
+    }),
     ...collectBuiltCodeReferences(outputDirectory).filter(
       (reference) =>
         !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(
@@ -848,12 +1000,15 @@ function decodeCssEscapes(value) {
   );
 }
 
-function resolveReferenceURL({ url, resolvedUrl, source }, basePath) {
+function resolveReferenceURL(
+  { url, resolvedUrl, source, resolveFrom },
+  basePath,
+) {
   const referenceUrl = resolvedUrl ?? url;
-  const sourceBase =
-    source.startsWith("index.html")
+  const sourceBase = resolveFrom ??
+    (source.startsWith("index.html")
       ? `http://preview.local${basePath}`
-      : `http://preview.local${basePath}${source}`;
+      : `http://preview.local${basePath}${source}`);
   return new URL(referenceUrl, sourceBase);
 }
 

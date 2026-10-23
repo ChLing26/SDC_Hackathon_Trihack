@@ -408,6 +408,111 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks local assets in same-origin iframe pages relative to the iframe URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="frames/embedded.html"></iframe>
+<iframe src="https://external.example.test/remote.html"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const framesDirectory = join(outputDirectory, "frames");
+    mkdirSync(assetsDirectory, { recursive: true });
+    mkdirSync(framesDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(join(assetsDirectory, "frame-image.webp"), "");
+    writeFileSync(join(assetsDirectory, "frame-style.svg"), "");
+    writeFileSync(
+      join(framesDirectory, "embedded.html"),
+      `<img src="../assets/frame-image.webp">
+<div style="background:url('../assets/frame-style.svg')"></div>`,
+    );
+    const messages = [];
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, {
+        cwd: tempRoot,
+        log: (message) => messages.push(message),
+      }),
+    );
+    assert.match(messages[0], /exist in the build output/);
+  });
+
+  it("reports missing resources in iframe pages with the iframe page and offending URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/embedded.html"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const framesDirectory = join(outputDirectory, "frames");
+    mkdirSync(assetsDirectory, { recursive: true });
+    mkdirSync(framesDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(framesDirectory, "embedded.html"),
+      `<img src="/preview/assets/missing-from-frame.webp">`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-from-frame\.webp" in iframe page frames\/embedded\.html:1 img\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect preview prefixes in iframe pages", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/embedded.html"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const framesDirectory = join(outputDirectory, "frames");
+    mkdirSync(assetsDirectory, { recursive: true });
+    mkdirSync(framesDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(framesDirectory, "embedded.html"),
+      `<img src="/assets/wrong-frame-prefix.webp">`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-frame-prefix\.webp" in iframe page frames\/embedded\.html:1 img\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports same-origin iframe HTML pages that are missing from the build", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/missing.html"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/frames\/missing\.html" in index\.html:2 iframe\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports a missing media poster with the app name and offending URL", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",
