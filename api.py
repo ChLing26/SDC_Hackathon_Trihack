@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI
 from pydantic import Field, model_validator
 
-from ai_advisor import AIConfigurationError, get_smart_advice
+from ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
 from src.backend_numbers import MAX_MONEY, checked_total
 from src.backend_security import RequestModel, require_service_auth
 
@@ -229,6 +229,7 @@ def supplier_advice(request: AdviceRequest):
 
     advice = None
     ai_status = "skipped"
+    ai_failure = None
 
     if ai_suppliers:
         try:
@@ -243,11 +244,21 @@ def supplier_advice(request: AdviceRequest):
 
         except AIConfigurationError:
             ai_status = "unavailable"
+            ai_failure = {"category": "configuration", "http_status": None}
             advice = "Gemini AI is not configured. Supplier validation is still available."
+        except GeminiProviderError as error:
+            ai_status = "failed"
+            ai_failure = {"category": error.category, "http_status": error.http_status}
+            advice = (
+                "AI advice is temporarily unavailable. "
+                "Supplier results and anomaly warnings "
+                "are still available."
+            )
         except Exception:
             # Keep the API working if Gemini is unavailable.
             # Provider exceptions may include credentials or submitted data.
             ai_status = "failed"
+            ai_failure = {"category": "provider", "http_status": 502}
             advice = (
                 "AI advice is temporarily unavailable. "
                 "Supplier results and anomaly warnings "
@@ -261,5 +272,6 @@ def supplier_advice(request: AdviceRequest):
         "warnings": warnings,
         "warning_count": len(warnings),
         "ai_status": ai_status,
+        "ai_failure": ai_failure,
         "ai_advice": advice
     }

@@ -381,7 +381,7 @@ components:
           items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
     ProcurementAdvice:
       type: object
-      required: [requestId, generatedAt, source, maxDeliveryDays, deadlinePassed, deadlinePolicy, aiStatus, advice, suppliers, warnings]
+      required: [requestId, generatedAt, source, maxDeliveryDays, deadlinePassed, deadlinePolicy, aiStatus, aiFailure, advice, suppliers, warnings]
       properties:
         requestId: { type: integer, minimum: 1 }
         generatedAt: { type: string, format: date-time }
@@ -393,6 +393,11 @@ components:
           description: Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.
           enum: [stored_date_utc_midnight]
         aiStatus: { type: string, enum: [success, unavailable, failed, skipped] }
+        aiFailure:
+          description: Bounded safe Gemini diagnostic only; no provider message, body, prompt or credential.
+          anyOf:
+            - $ref: "#/components/schemas/GeminiFailure"
+            - type: "null"
         advice: { type: [string, "null"], maxLength: 20000 }
         suppliers:
           type: array
@@ -400,6 +405,18 @@ components:
         warnings:
           type: array
           items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
+    GeminiFailure:
+      type: object
+      additionalProperties: false
+      required: [category, httpStatus]
+      properties:
+        category:
+          type: string
+          enum: [configuration, quota, permission, model, timeout, provider]
+        httpStatus:
+          description: Standard provider status retained only from a strict allowlist; null when not applicable.
+          type: [integer, "null"]
+          enum: [400, 401, 403, 404, 408, 409, 413, 415, 422, 429, 500, 501, 502, 503, 504, null]
     ProcurementRequestInput:
       type: object
       required: [itemName, quantity, budgetAmount, currency, requiredDeliveryDate, deliveryLocation, requesterName]

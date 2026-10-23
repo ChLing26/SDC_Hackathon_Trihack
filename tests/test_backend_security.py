@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import os
+import json
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -136,6 +137,9 @@ class AuthenticationChecks(unittest.TestCase):
             with TestClient(app) as client, patch.object(ai_advisor, "client", None):
                 response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
                 self.assertEqual(response.json()["ai_status"], "unavailable")
+                self.assertEqual(response.json()["ai_failure"], {
+                    "category": "configuration", "http_status": None,
+                })
                 self.assertEqual(response.json()["suppliers"][0]["total_cost_rm"], 25)
             with TestClient(app) as client, patch(
                 "api.get_smart_advice", side_effect=RuntimeError("private-provider-detail"),
@@ -143,6 +147,42 @@ class AuthenticationChecks(unittest.TestCase):
                 response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
                 self.assertEqual(response.json()["ai_status"], "failed")
                 self.assertNotIn("private-provider-detail", response.text)
+                self.assertEqual(response.json()["ai_failure"], {
+                    "category": "provider", "http_status": 502,
+                })
+
+    def test_safe_provider_categories_and_statuses_never_include_raw_details(self):
+        from api import app
+        from ai_advisor import GeminiProviderError
+        cases = (
+            ("quota", 429), ("permission", 403), ("model", 404),
+            ("timeout", 504), ("provider", 502),
+        )
+        with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
+            for category, status in cases:
+                with self.subTest(category=category), TestClient(app) as client, patch(
+                    "api.get_smart_advice",
+                    side_effect=GeminiProviderError(category, status),
+                ):
+                    response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
+                    self.assertEqual(response.status_code, 200)
+                    body = response.json()
+                    self.assertEqual(body["ai_status"], "failed")
+                    self.assertEqual(body["ai_failure"], {
+                        "category": category, "http_status": status,
+                    })
+                    self.assertEqual(set(body["ai_failure"]), {"category", "http_status"})
+                    serialized_failure = json.dumps(body["ai_failure"])
+                    self.assertNotIn(TOKEN, serialized_failure)
+                    self.assertNotIn("private-provider-detail", serialized_failure)
+                    self.assertNotIn("Fixture supplier", serialized_failure)
+                    self.assertNotIn("private-provider-detail", body["ai_advice"])
+                    self.assertEqual(body["suppliers"][0]["total_cost_rm"], 25)
+                    self.assertEqual(body["suppliers"][0]["within_budget"], True)
+
+        from ai_advisor import classify_gemini_error
+        unsafe = classify_gemini_error(type("ProviderError", (Exception,), {"code": 799})("sensitive body"))
+        self.assertEqual((unsafe.category, unsafe.http_status), ("provider", 502))
 
 
 class DatabaseAndEntryPointChecks(unittest.TestCase):

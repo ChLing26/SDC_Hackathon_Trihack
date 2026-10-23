@@ -10,6 +10,13 @@ import {
 const DESTINATION = "http://127.0.0.1:8000/supplier-advice";
 const MAX_MONEY = 1_000_000_000_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
+const SAFE_PROVIDER_HTTP_STATUSES = [400, 401, 403, 404, 408, 409, 413, 415, 422, 429, 500, 501, 502, 503, 504] as const;
+const providerFailure = z.object({
+  category: z.enum(["configuration", "quota", "permission", "model", "timeout", "provider"]),
+  http_status: z.number().int().nullable().refine(
+    status => status === null || SAFE_PROVIDER_HTTP_STATUSES.some(safe => safe === status),
+  ),
+}).nullable();
 const money = z.number().finite().min(0).max(MAX_MONEY);
 const nonnegative = z.number().finite().min(0);
 const warningSchema = z.object({
@@ -24,6 +31,7 @@ const responseSchema = z.object({
   supplier_count: z.number().int().min(1).max(100),
   warning_count: z.number().int().min(0).max(400),
   ai_status: z.enum(["success", "unavailable", "failed", "skipped"]),
+  ai_failure: providerFailure,
   ai_advice: z.string().max(20000).nullable(),
   warnings: z.array(warningSchema).max(400),
   suppliers: z.array(z.object({
@@ -155,9 +163,18 @@ export function createPythonAdviceClient(dependencies: Dependencies = {}) {
       let result: z.infer<typeof responseSchema>;
       try {
         result = responseSchema.parse(raw);
+        const invalidAiState =
+          (result.ai_status === "success" && (!result.ai_advice?.trim() || result.ai_failure !== null)) ||
+          (result.ai_status === "skipped" && result.ai_failure !== null) ||
+          (result.ai_status === "unavailable" &&
+            (result.ai_failure?.category !== "configuration" || result.ai_failure.http_status !== null)) ||
+          (result.ai_status === "failed" &&
+            (!result.ai_failure || result.ai_failure.category === "configuration" || result.ai_failure.http_status === null));
         if (result.supplier_count !== payload.suppliers.length || result.suppliers.length !== payload.suppliers.length ||
             result.warning_count !== result.warnings.length || new Set(result.suppliers.map(s => s.quote_id)).size !== result.suppliers.length ||
-            (result.ai_status === "success" && !result.ai_advice?.trim())) throw new Error("Invalid counts");
+            invalidAiState) {
+          throw new Error("Invalid counts");
+        }
         const expected = new Map(payload.suppliers.map(s => [s.quote_id, s]));
         for (const warning of result.warnings) {
           if (expected.get(warning.quote_id)?.name !== warning.supplier) throw new Error("Unknown warning identity");
@@ -185,6 +202,9 @@ export function createPythonAdviceClient(dependencies: Dependencies = {}) {
         requestId: record.id, generatedAt: new Date(now).toISOString(), source: "illustrative_offers",
         maxDeliveryDays: payload.max_delivery_days, deadlinePassed, deadlinePolicy: "stored_date_utc_midnight",
         aiStatus: result.ai_status,
+        aiFailure: result.ai_failure ? {
+          category: result.ai_failure.category, httpStatus: result.ai_failure.http_status,
+        } : null,
         advice: result.ai_status === "success" ? result.ai_advice :
           result.ai_status === "skipped" ? null : "AI advice is unavailable. Eligibility and anomaly checks are still available.",
         suppliers: result.suppliers.map(s => ({

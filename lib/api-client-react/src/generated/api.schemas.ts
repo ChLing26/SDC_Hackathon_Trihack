@@ -146,6 +146,52 @@ export const ProcurementAdviceAiStatus = {
   skipped: 'skipped',
 } as const;
 
+export type GeminiFailureCategory = typeof GeminiFailureCategory[keyof typeof GeminiFailureCategory];
+
+
+export const GeminiFailureCategory = {
+  configuration: 'configuration',
+  quota: 'quota',
+  permission: 'permission',
+  model: 'model',
+  timeout: 'timeout',
+  provider: 'provider',
+} as const;
+
+/**
+ * Standard provider status retained only from a strict allowlist; null when not applicable.
+ * @nullable
+ */
+export type GeminiFailureHttpStatus = typeof GeminiFailureHttpStatus[keyof typeof GeminiFailureHttpStatus] | null;
+
+
+export const GeminiFailureHttpStatus = {
+  NUMBER_400: 400,
+  NUMBER_401: 401,
+  NUMBER_403: 403,
+  NUMBER_404: 404,
+  NUMBER_408: 408,
+  NUMBER_409: 409,
+  NUMBER_413: 413,
+  NUMBER_415: 415,
+  NUMBER_422: 422,
+  NUMBER_429: 429,
+  NUMBER_500: 500,
+  NUMBER_501: 501,
+  NUMBER_502: 502,
+  NUMBER_503: 503,
+  NUMBER_504: 504,
+} as const;
+
+export interface GeminiFailure {
+  category: GeminiFailureCategory;
+  /**
+     * Standard provider status retained only from a strict allowlist; null when not applicable.
+     * @nullable
+     */
+  httpStatus: GeminiFailureHttpStatus;
+}
+
 export interface ProcurementAdvice {
   /** @minimum 1 */
   requestId: number;
@@ -157,6 +203,8 @@ export interface ProcurementAdvice {
   /** Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date. */
   deadlinePolicy: ProcurementAdviceDeadlinePolicy;
   aiStatus: ProcurementAdviceAiStatus;
+  /** Bounded safe Gemini diagnostic only; no provider message, body, prompt or credential. */
+  aiFailure: GeminiFailure | null;
   /**
      * @maxLength 20000
      * @nullable

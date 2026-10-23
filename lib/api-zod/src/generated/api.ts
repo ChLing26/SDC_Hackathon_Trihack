@@ -335,6 +335,10 @@ export const GetProcurementAdviceResponse = zod.object({
   "deadlinePassed": zod.boolean(),
   "deadlinePolicy": zod.enum(['stored_date_utc_midnight']).describe('Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.'),
   "aiStatus": zod.enum(['success', 'unavailable', 'failed', 'skipped']),
+  "aiFailure": zod.union([zod.object({
+  "category": zod.enum(['configuration', 'quota', 'permission', 'model', 'timeout', 'provider']),
+  "httpStatus": zod.union([zod.literal(400),zod.literal(401),zod.literal(403),zod.literal(404),zod.literal(408),zod.literal(409),zod.literal(413),zod.literal(415),zod.literal(422),zod.literal(429),zod.literal(500),zod.literal(501),zod.literal(502),zod.literal(503),zod.literal(504),zod.literal(null)]).nullable().describe('Standard provider status retained only from a strict allowlist; null when not applicable.')
+}),zod.null()]).describe('Bounded safe Gemini diagnostic only; no provider message, body, prompt or credential.'),
   "advice": zod.string().max(getProcurementAdviceResponseAdviceMax).nullable(),
   "suppliers": zod.array(zod.object({
   "offerId": zod.number().int().min(1),

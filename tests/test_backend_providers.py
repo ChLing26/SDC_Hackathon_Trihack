@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from ai_advisor import AIConfigurationError, get_smart_advice
+from ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
 from distance import get_distance
 
 SUPPLIERS = [{
@@ -22,11 +22,13 @@ class ProviderChecks(unittest.TestCase):
         client = Mock()
         client.models.generate_content.return_value.text = ""
         with patch("ai_advisor.client", client):
-            with self.assertRaisesRegex(RuntimeError, "^Gemini request failed.$"):
+            with self.assertRaisesRegex(GeminiProviderError, "^Gemini advice is temporarily unavailable.$") as empty:
                 get_smart_advice(SUPPLIERS, 30, 3)
+            self.assertEqual((empty.exception.category, empty.exception.http_status), ("provider", 502))
             client.models.generate_content.side_effect = RuntimeError("do-not-leak-provider-body")
-            with self.assertRaisesRegex(RuntimeError, "^Gemini request failed.$"):
+            with self.assertRaisesRegex(GeminiProviderError, "^Gemini advice is temporarily unavailable.$") as failed:
                 get_smart_advice(SUPPLIERS, 30, 3)
+            self.assertEqual((failed.exception.category, failed.exception.http_status), ("provider", 502))
 
     def test_nonfinite_ai_data_is_rejected_before_network(self):
         with patch("ai_advisor.client") as client:

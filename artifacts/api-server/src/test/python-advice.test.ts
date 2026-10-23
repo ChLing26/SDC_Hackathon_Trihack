@@ -31,7 +31,10 @@ function reply(record = fixture()) {
   const { payload } = buildAdvicePayload(record, {}, NOW);
   return {
     status: "success", supplier_count: payload.suppliers.length, warning_count: 0,
-    ai_status: "success", ai_advice: "Fixture advice", warnings: [] as Array<{
+    ai_status: "success", ai_advice: "Fixture advice", ai_failure: null as null | {
+      category: "configuration" | "quota" | "permission" | "model" | "timeout" | "provider";
+      http_status: number | null;
+    }, warnings: [] as Array<{
       quote_id: string; supplier: string; type: string; severity: string; message: string;
     }>,
     suppliers: payload.suppliers.map(s => ({
@@ -126,6 +129,15 @@ test("response must match stored quote IDs, names, totals, eligibility and count
     (r: ReturnType<typeof reply>) => { r.suppliers[0].meets_delivery_requirement = false; },
     (r: ReturnType<typeof reply>) => { r.supplier_count = 3; },
     (r: ReturnType<typeof reply>) => { r.suppliers[1] = r.suppliers[0]; },
+    (r: ReturnType<typeof reply>) => {
+      r.ai_status = "failed";
+      r.ai_failure = { category: "provider", http_status: 600 };
+    },
+    (r: ReturnType<typeof reply>) => {
+      r.ai_status = "failed";
+      r.ai_failure = { category: "provider", http_status: 502 };
+      (r.ai_failure as unknown as Record<string, unknown>).category = TOKEN;
+    },
   ];
   for (const mutate of mutations) {
     const r = reply(); mutate(r);
@@ -133,15 +145,32 @@ test("response must match stored quote IDs, names, totals, eligibility and count
   }
 });
 
+test("safe failure response drops unrecognized provider details", async () => {
+  const r = reply();
+  r.ai_status = "failed";
+  r.ai_failure = { category: "quota", http_status: 429 };
+  Object.assign(r.ai_failure, { message: TOKEN, response_body: "submitted quote and provider response" });
+  const result = await client(r)(fixture(), {}, NOW);
+  assert.deepEqual(result.aiFailure, { category: "quota", httpStatus: 429 });
+  assert.equal(JSON.stringify(result.aiFailure).includes(TOKEN), false);
+  assert.equal(JSON.stringify(result.aiFailure).includes("submitted quote"), false);
+});
+
 test("AI failure/unavailability preserves deterministic warnings and quote attribution", async () => {
   for (const status of ["failed", "unavailable"]) {
     const r = reply();
     r.ai_status = status; r.ai_advice = TOKEN;
+    r.ai_failure = status === "failed"
+      ? { category: "provider", http_status: 502 }
+      : { category: "configuration", http_status: null };
     const warning = { quote_id: r.suppliers[1].quote_id, supplier: r.suppliers[1].name,
       type: "TOTAL_COST_MISMATCH", severity: "high", message: "Fixture mismatch" };
     r.warnings = [warning]; r.warning_count = 1; r.suppliers[1].anomalies = [warning];
     const result = await client(r)(fixture(), {}, NOW);
     assert.equal(result.aiStatus, status);
+    assert.deepEqual(result.aiFailure, status === "failed"
+      ? { category: "provider", httpStatus: 502 }
+      : { category: "configuration", httpStatus: null });
     assert.equal(result.warnings[0].offerId, 712);
     assert.equal(result.suppliers[0].anomalies.length, 0);
     assert.equal(result.suppliers[1].anomalies.length, 1);
@@ -177,7 +206,14 @@ test("adapter wire contract matches real FastAPI validation with AI disabled and
 });
 
 test("real Gemini error handling through FastAPI and adapter preserves checks without leaking provider details", async () => {
-  for (const failure of ["quota", "denied", "timeout", "empty"]) {
+  const failures = {
+    quota: { category: "quota", status: 429 },
+    denied: { category: "permission", status: 403 },
+    model: { category: "model", status: 404 },
+    timeout: { category: "timeout", status: 504 },
+    empty: { category: "provider", status: 502 },
+  } as const;
+  for (const [failure, expected] of Object.entries(failures)) {
     const record = fixture();
     record.offers[0].totalPrice = 1;
     const call = createPythonAdviceClient({ token: () => TOKEN, fetch: async (_url, options) => {
@@ -192,13 +228,17 @@ test("real Gemini error handling through FastAPI and adapter preserves checks wi
         "if mode=='empty': client.models.generate_content.return_value.text=''",
         "elif mode=='timeout': client.models.generate_content.side_effect=TimeoutError('fixture-private-provider-detail')",
         "else: client.models.generate_content.side_effect=ClientError(429 if mode=='quota' else 403, {'error':{'message':'fixture-private-provider-detail','status':'RESOURCE_EXHAUSTED' if mode=='quota' else 'PERMISSION_DENIED'}})",
+        "if mode=='model': client.models.generate_content.side_effect=ClientError(404, {'error':{'message':'fixture-private-provider-detail','status':'NOT_FOUND'}})",
         "with patch('ai_advisor.client',client), TestClient(app) as c:",
         " r=c.post('/supplier-advice',json=json.load(sys.stdin),headers={'Authorization':'Bearer '+os.environ['PYTHON_BACKEND_TOKEN']})",
         " assert client.models.generate_content.call_count==1",
         " assert r.json()['ai_status']=='failed'",
+        " assert r.json()['ai_failure']=={'category':sys.argv[2],'http_status':int(sys.argv[3])}",
         " assert 'fixture-private-provider-detail' not in r.text",
+        " assert os.environ['PYTHON_BACKEND_TOKEN'] not in json.dumps(r.json()['ai_failure'])",
+        " assert 'Synthetic' not in json.dumps(r.json()['ai_failure'])",
         " print(json.dumps({'status':r.status_code,'body':r.json()}))",
-      ].join("\n"), failure], {
+      ].join("\n"), failure, expected.category, String(expected.status)], {
         cwd: path.resolve(import.meta.dirname, "../../../.."), input: String(options?.body),
         encoding: "utf8", timeout: 10_000,
         env: { ...process.env, PYTHON_BACKEND_TOKEN: TOKEN, GEMINI_API_KEY: "", DATABASE_URL: "", PYTHON_SQLITE_PATH: "" },
@@ -210,6 +250,7 @@ test("real Gemini error handling through FastAPI and adapter preserves checks wi
     } });
     const result = await call(record, {}, NOW);
     assert.equal(result.aiStatus, "failed");
+    assert.deepEqual(result.aiFailure, { category: expected.category, httpStatus: expected.status });
     assert.equal(result.advice, "AI advice is unavailable. Eligibility and anomaly checks are still available.");
     assert.equal(result.suppliers[0].totalPrice, 11.3);
     assert.equal(result.suppliers[0].withinBudget, true);

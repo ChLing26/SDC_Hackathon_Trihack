@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { GeminiFailure } from './geminiFailure';
 import type { ProcurementAdviceAiStatus } from './procurementAdviceAiStatus';
 import type { ProcurementAdviceDeadlinePolicy } from './procurementAdviceDeadlinePolicy';
 import type { ProcurementAdviceSource } from './procurementAdviceSource';
@@ -22,6 +23,8 @@ export interface ProcurementAdvice {
   /** Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date. */
   deadlinePolicy: ProcurementAdviceDeadlinePolicy;
   aiStatus: ProcurementAdviceAiStatus;
+  /** Bounded safe Gemini diagnostic only; no provider message, body, prompt or credential. */
+  aiFailure: GeminiFailure | null;
   /**
      * @maxLength 20000
      * @nullable

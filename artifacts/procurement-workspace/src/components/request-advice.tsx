@@ -2,6 +2,15 @@ import { useGetProcurementAdvice } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { money } from "@/components/shell";
 
+const failureLabels = {
+  configuration: "Gemini is not configured",
+  quota: "Gemini quota limit",
+  permission: "Gemini permission or credential issue",
+  model: "Gemini model unavailable or invalid",
+  timeout: "Gemini timed out",
+  provider: "Gemini provider error",
+} as const;
+
 /** Transient checks only: never selects a supplier or changes a procurement record. */
 export function RequestAdvice({ requestId, currency }: { requestId: number; currency: string }) {
   const mutation = useGetProcurementAdvice();
@@ -32,6 +41,11 @@ export function RequestAdvice({ requestId, currency }: { requestId: number; curr
             Delivery checks use {result.maxDeliveryDays} remaining 24-hour periods to UTC midnight of the stored delivery date,
             matching the existing illustrative scoring policy.
           </p>
+          {result.aiFailure && <p role="status" data-testid="gemini-failure-category" className="text-xs text-muted-foreground">
+            {failureLabels[result.aiFailure.category]}
+            {result.aiFailure.httpStatus === null ? "" : ` · HTTP ${result.aiFailure.httpStatus}`}.
+            Deterministic eligibility and anomaly checks are still available.
+          </p>}
           {result.deadlinePassed && <p role="alert" className="text-destructive">The stored delivery deadline has passed. No offer meets that deadline.</p>}
           <ul className="divide-y">
             {result.suppliers.map(s => (

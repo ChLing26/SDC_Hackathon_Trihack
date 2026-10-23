@@ -28,6 +28,48 @@ MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
 class AIConfigurationError(RuntimeError):
     """Gemini has no configured credential; not a successful AI response."""
 
+
+GEMINI_FAILURE_CATEGORIES = frozenset({
+    "quota", "permission", "model", "timeout", "provider",
+})
+SAFE_PROVIDER_HTTP_STATUSES = frozenset({
+    400, 401, 403, 404, 408, 409, 413, 415, 422, 429,
+    500, 501, 502, 503, 504,
+})
+
+
+class GeminiProviderError(RuntimeError):
+    """A provider failure with bounded, non-sensitive diagnostic fields only."""
+
+    def __init__(self, category: str, http_status: int):
+        if category not in GEMINI_FAILURE_CATEGORIES:
+            category = "provider"
+        if http_status not in SAFE_PROVIDER_HTTP_STATUSES:
+            http_status = 502
+        super().__init__("Gemini advice is temporarily unavailable.")
+        self.category = category
+        self.http_status = http_status
+
+
+def classify_gemini_error(error: Exception) -> GeminiProviderError:
+    """Classify SDK failures without reading messages or provider response bodies."""
+    code = getattr(error, "code", None)
+    provider_status = code if type(code) is int and code in SAFE_PROVIDER_HTTP_STATUSES else None
+    status_name = getattr(error, "status", None)
+    status_name = status_name.upper() if isinstance(status_name, str) else ""
+    exception_name = type(error).__name__.lower()
+
+    if "timeout" in exception_name or code in (408, 504) or status_name == "DEADLINE_EXCEEDED":
+        return GeminiProviderError("timeout", provider_status or 504)
+    if code == 429 or status_name in {"RESOURCE_EXHAUSTED", "TOO_MANY_REQUESTS"}:
+        return GeminiProviderError("quota", provider_status or 429)
+    if code in (401, 403) or status_name in {"UNAUTHENTICATED", "PERMISSION_DENIED"}:
+        return GeminiProviderError("permission", provider_status or 403)
+    if code in (400, 404, 422) or status_name in {"NOT_FOUND", "INVALID_ARGUMENT"}:
+        return GeminiProviderError("model", provider_status or 404)
+    return GeminiProviderError("provider", provider_status or 502)
+
+
 # 2. Smart Supplier Recommendation
 def get_smart_advice(
     suppliers,
@@ -183,9 +225,11 @@ def get_smart_advice(
 
         return response.text
 
-    except Exception:
-        # Do not leak upstream response bodies, request data or credentials.
-        raise RuntimeError("Gemini request failed.") from None
+    except Exception as error:
+        # Only the bounded category/status escape. Never retain or expose the
+        # provider exception, message, response, submitted quote, or credential.
+        failure = classify_gemini_error(error)
+        raise failure from None
 
 
 # Test the AI Advisor
