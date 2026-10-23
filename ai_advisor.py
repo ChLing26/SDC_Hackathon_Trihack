@@ -233,8 +233,15 @@ def get_smart_advice(
             contents=prompt,
             config=types.GenerateContentConfig(
                 http_options=_gemini_http_options(),
+                automatic_continuation=False,
             ),
         )
+
+        if any(
+            candidate.finish_reason == types.FinishReason.CONTINUATION
+            for candidate in (response.candidates or [])
+        ):
+            raise RuntimeError("Gemini returned incomplete advice.")
 
         if not response.text:
             raise RuntimeError("Gemini returned an empty response.")

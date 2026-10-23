@@ -1,5 +1,6 @@
 """Offline failure/validation tests; live probes are reported separately."""
 
+import base64
 import unittest
 from unittest.mock import Mock, patch
 
@@ -63,6 +64,46 @@ class ProviderChecks(unittest.TestCase):
         try:
             with patch.object(ai_advisor, "client", sdk_client):
                 with self.assertRaises(GeminiProviderError):
+                    get_smart_advice(SUPPLIERS, 30, 3)
+            self.assertEqual(len(requests), 1)
+        finally:
+            sdk_client.close()
+
+    def test_continuation_response_does_not_trigger_another_provider_request(self):
+        requests = []
+
+        def requires_continuation(request):
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [{
+                        "content": {
+                            "role": "model",
+                            "parts": [{"text": "Incomplete supplier advice."}],
+                        },
+                        "finishReason": "CONTINUATION",
+                        "continuationToken": base64.b64encode(
+                            b"offline-continuation-token"
+                        ).decode("ascii"),
+                    }],
+                },
+            )
+
+        sdk_client = genai.Client(
+            api_key="offline-test-key",
+            http_options=types.HttpOptions(
+                client_args={
+                    "transport": httpx.MockTransport(requires_continuation),
+                },
+            ),
+        )
+        try:
+            with patch.object(ai_advisor, "client", sdk_client):
+                with self.assertRaisesRegex(
+                    GeminiProviderError,
+                    "^Gemini advice is temporarily unavailable.$",
+                ):
                     get_smart_advice(SUPPLIERS, 30, 3)
             self.assertEqual(len(requests), 1)
         finally:
