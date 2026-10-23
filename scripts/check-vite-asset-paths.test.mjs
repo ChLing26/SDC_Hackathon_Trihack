@@ -64,6 +64,8 @@ describe("Vite preview asset paths", () => {
       html: `<script src="/preview/assets/app.js"></script>
         <img src="/preview/media/brandmark">
         <video poster="/preview/media/poster"><source src="/preview/media/intro"></video>
+        <object data="/preview/media/object-image" type="image/png"></object>
+        <object data="/preview/media/object-audio" type=audio/mpeg></object>
         <link rel="preload" as="image" href="/preview/media/preloaded">
         <link rel="icon" href="/preview/media/favicon">
         <a href="/preview/products/item">Product details</a>`,
@@ -75,6 +77,8 @@ describe("Vite preview asset paths", () => {
       "brandmark",
       "poster",
       "intro",
+      "object-image",
+      "object-audio",
       "preloaded",
       "favicon",
     ]) {
@@ -91,6 +95,9 @@ describe("Vite preview asset paths", () => {
       html: `<script src="/preview/assets/app.js"></script>
         <img src="/preview/media/missing-image">
         <audio src="/preview/media/missing-audio"></audio>
+        <object data="/preview/media/missing-object-image" type="image/svg+xml"></object>
+        <object data="/preview/media/missing-object-video" type='video/mp4'></object>
+        <object data="/preview/media/ignored-document" type="application/pdf"></object>
         <link rel="preload" as="image" href="/preview/media/missing-preload">
         <link rel="icon" href="/preview/media/missing-icon">
         <a href="/preview/products/missing-item">Product details</a>`,
@@ -103,8 +110,11 @@ describe("Vite preview asset paths", () => {
       (error) => {
         assert.match(error.message, /"\/preview\/media\/missing-image"/);
         assert.match(error.message, /"\/preview\/media\/missing-audio"/);
+        assert.match(error.message, /"\/preview\/media\/missing-object-image"/);
+        assert.match(error.message, /"\/preview\/media\/missing-object-video"/);
         assert.match(error.message, /"\/preview\/media\/missing-preload"/);
         assert.match(error.message, /"\/preview\/media\/missing-icon"/);
+        assert.doesNotMatch(error.message, /ignored-document/);
         assert.doesNotMatch(error.message, /missing-item/);
         return true;
       },

@@ -174,7 +174,7 @@ function collectHTMLReferences(html, sourcePrefix) {
   const references = [];
   const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const attributePattern =
-    /\b(src|href|srcset|imagesrcset|poster)\s*=\s*["']([^"']+)["']/gi;
+    /\b(src|href|srcset|imagesrcset|poster|data)\s*=\s*["']([^"']+)["']/gi;
 
   for (const tagMatch of html.matchAll(tagPattern)) {
     const element = tagMatch[1].toLowerCase();
@@ -187,7 +187,11 @@ function collectHTMLReferences(html, sourcePrefix) {
 
       for (const url of urls) {
         if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
-        if (attribute === "src" || attribute === "href") {
+        if (
+          attribute === "src" ||
+          attribute === "href" ||
+          (attribute === "data" && element === "object")
+        ) {
           const isKnownAssetPath =
             /(?:^|\/)assets\/|(?:^|\/)[^/]+\.(?:m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(
               url,
@@ -253,6 +257,16 @@ function collectIframeSrcdocReferences(html, documentSource = "index.html") {
 }
 
 function isMediaResourceAttribute(element, attribute, tagAttributes) {
+  if (attribute === "data" && element === "object") {
+    const typeMatch = tagAttributes.match(
+      /\btype\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i,
+    );
+    const mimeType = (typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? "")
+      .trim()
+      .toLowerCase();
+    return /^(?:image|audio|video)\//.test(mimeType);
+  }
+
   if (
     attribute === "src" &&
     /^(?:img|video|audio|source|track|embed)$/.test(element)
