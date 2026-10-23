@@ -229,7 +229,58 @@ describe("Vite preview asset paths", () => {
     writeFileSync(join(assetsDirectory, "hero.webp"), "");
     writeFileSync(join(assetsDirectory, "app.js"), "");
 
-    assert.doesNotThrow(() => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }));
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("resolves CSS-escaped filenames relative to the emitted stylesheet", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./hero\\20 image.webp")} @font-face{src:url("./font\\20 regular.woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "hero image.webp"), "");
+    writeFileSync(join(assetsDirectory, "font regular.woff2"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports the app and authored escaped URL when a CSS-escaped asset is missing", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./missing\\20 image.webp")}',
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /Canvas build output is missing file referenced by URL/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/missing\\20 image\.webp" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
   });
 
   it("reports the app and URL when a linked CSS asset is missing", () => {

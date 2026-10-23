@@ -22,8 +22,12 @@ const quotedAssetReferencePattern = new RegExp(
   "gi",
 );
 const cssUrlReferencePattern = new RegExp(
-  String.raw`url\(\s*["']?((?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["']?\s*\)`,
+  String.raw`url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\(?:[0-9a-fA-F]{1,6}[\t\n\f\r ]?|[\s\S])|[^)\s])*))\s*\)`,
   "gi",
+);
+const cssAssetExtensionPattern = new RegExp(
+  String.raw`\.(?:${assetExtensions})(?:[?#]|$)`,
+  "i",
 );
 const cssImportReferencePattern =
   /@import\s+(?!url\s*\()\s*["']((?:\/|\.\.?\/)?[^"'\x60\s()<>;,]+?\.css(?:[?#][^"'\x60\s()<>;,]*)?)["']/gi;
@@ -92,20 +96,23 @@ function collectBuiltCodeReferences(outputDirectory) {
 
       const source = relative(outputDirectory, entryPath).split(sep).join("/");
       const rawContent = readFileSync(entryPath, "utf8");
-      const content = entry.name.endsWith(".css")
-        ? stripCssComments(rawContent)
-        : rawContent;
-      const patterns =
-        entry.name.endsWith(".css")
-          ? [quotedAssetReferencePattern, cssUrlReferencePattern]
-          : [quotedAssetReferencePattern];
+      const isStylesheet = /\.css$/i.test(entry.name);
+      const content = isStylesheet ? stripCssComments(rawContent) : rawContent;
       const seenUrls = new Set();
-      for (const pattern of patterns) {
-        for (const match of content.matchAll(pattern)) {
-          if (seenUrls.has(match[1])) continue;
-          seenUrls.add(match[1]);
-          references.push({ url: match[1], source });
+
+      if (isStylesheet) {
+        for (const match of content.matchAll(cssUrlReferencePattern)) {
+          const reference = createCssURLReference(match, source);
+          if (!reference || seenUrls.has(reference.url)) continue;
+          seenUrls.add(reference.url);
+          references.push(reference);
         }
+      }
+
+      for (const match of content.matchAll(quotedAssetReferencePattern)) {
+        if (seenUrls.has(match[1])) continue;
+        seenUrls.add(match[1]);
+        references.push({ url: match[1], source });
       }
     }
   }
@@ -150,16 +157,28 @@ function collectInlineStyleReferences(html) {
 
   function addStyleReferences(style, sourceOffset) {
     const commentStrippedStyle = stripCssComments(style);
-    for (const pattern of [cssUrlReferencePattern, cssImportReferencePattern]) {
-      for (const match of commentStrippedStyle.matchAll(pattern)) {
-        const url = match[1];
-        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
-
-        references.push({
-          url,
-          source: `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
-        });
+    for (const match of commentStrippedStyle.matchAll(cssUrlReferencePattern)) {
+      const reference = createCssURLReference(
+        match,
+        `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
+      );
+      if (!reference) continue;
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(reference.resolvedUrl)) {
+        continue;
       }
+      references.push(reference);
+    }
+
+    for (const match of commentStrippedStyle.matchAll(
+      cssImportReferencePattern,
+    )) {
+      const url = match[1];
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+
+      references.push({
+        url,
+        source: `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
+      });
     }
   }
 
@@ -282,7 +301,10 @@ export function checkAssetPaths(app, {
     ...collectHTMLReferences(html),
     ...collectInlineStyleReferences(html),
     ...collectBuiltCodeReferences(outputDirectory).filter(
-      ({ url }) => !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url),
+      (reference) =>
+        !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(
+          reference.resolvedUrl ?? reference.url,
+        ),
     ),
   ];
 
@@ -349,12 +371,40 @@ export function checkAssetPaths(app, {
   log(`${app.name} assets use configured prefix "${assetPrefix}" and exist in the build output.`);
 }
 
-function resolveReferenceURL({ url, source }, basePath) {
+function createCssURLReference(match, source) {
+  const url = match[1] ?? match[2] ?? match[3] ?? "";
+  const resolvedUrl = decodeCssEscapes(url);
+  if (!cssAssetExtensionPattern.test(resolvedUrl)) return null;
+  return { url, resolvedUrl, source };
+}
+
+function decodeCssEscapes(value) {
+  return value.replace(
+    /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[\t\n\f\r ])?|(\r\n|[\n\r\f])|([\s\S]))/g,
+    (_match, hex, lineContinuation, escapedCharacter) => {
+      if (hex) {
+        const codePoint = Number.parseInt(hex, 16);
+        if (
+          codePoint === 0 ||
+          codePoint > 0x10ffff ||
+          (codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ) {
+          return "\ufffd";
+        }
+        return String.fromCodePoint(codePoint);
+      }
+      return lineContinuation ? "" : (escapedCharacter ?? "");
+    },
+  );
+}
+
+function resolveReferenceURL({ url, resolvedUrl, source }, basePath) {
+  const referenceUrl = resolvedUrl ?? url;
   const sourceBase =
-    source.startsWith("index.html") || url.startsWith("assets/")
+    source.startsWith("index.html") || referenceUrl.startsWith("assets/")
       ? `http://preview.local${basePath}`
       : `http://preview.local${basePath}${source}`;
-  return new URL(url, sourceBase);
+  return new URL(referenceUrl, sourceBase);
 }
 
 function formatReference({ url, source }) {
