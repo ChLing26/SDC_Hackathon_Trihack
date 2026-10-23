@@ -192,6 +192,71 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("decodes HTML character references in inline styles and preserves their HTML locations", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background: url(&quot;/preview/assets/missing-inline.webp&quot;)"></div>
+<style>
+.banner { background: url(&quot;/preview/assets/missing-block.svg&quot;); }
+</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-inline\.webp" in index\.html:2/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-block\.svg" in index\.html:4/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports an entity-encoded wrong preview prefix with its HTML source location", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<style>.hero { background: url(&quot;&#47;assets&#47;wrong-prefix.svg&quot;); }</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-prefix\.svg" in index\.html:2/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("checks entity-encoded local style URLs while ignoring encoded external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background: url(&quot;&#47;preview&#47;assets&#47;inline.webp&quot;); mask: url(&quot;https&#58;&#47;&#47;cdn.example.test&#47;mask.svg&quot;); border-image: url(&quot;data&#58;image&#47;svg+xml;base64,AAAA&quot;)"></div>
+<style>.hero { background: url(&quot;&#47;preview&#47;assets&#47;block.svg&quot;); }</style>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of ["app.js", "inline.webp", "block.svg"]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("reports a missing media poster with the app name and offending URL", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",

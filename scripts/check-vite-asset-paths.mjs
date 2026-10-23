@@ -189,11 +189,15 @@ function collectInlineStyleReferences(html) {
   const styleBlockPattern = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 
   function addStyleReferences(style, sourceOffset) {
-    const commentStrippedStyle = stripCssComments(style);
+    const { value: decodedStyle, sourceOffsets } =
+      decodeHtmlCharacterReferences(style);
+    const commentStrippedStyle = stripCssComments(decodedStyle);
+    const sourceOffsetAt = (styleOffset) =>
+      sourceOffset + (sourceOffsets[styleOffset] ?? style.length);
     for (const match of commentStrippedStyle.matchAll(cssUrlReferencePattern)) {
       const reference = createCssURLReference(
         match,
-        `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
+        `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
       );
       if (!reference) continue;
       if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(reference.resolvedUrl)) {
@@ -210,7 +214,7 @@ function collectInlineStyleReferences(html) {
 
       references.push({
         url,
-        source: `index.html:${lineNumberAt(html, sourceOffset + match.index)}`,
+        source: `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
       });
     }
   }
@@ -226,6 +230,101 @@ function collectInlineStyleReferences(html) {
   }
 
   return references;
+}
+
+const htmlCharacterReferences = {
+  AMP: "&",
+  apos: "'",
+  ast: "*",
+  colon: ":",
+  commat: "@",
+  dollar: "$",
+  equals: "=",
+  excl: "!",
+  gt: ">",
+  GT: ">",
+  hyphen: "-",
+  lpar: "(",
+  lt: "<",
+  LT: "<",
+  lowbar: "_",
+  num: "#",
+  percnt: "%",
+  period: ".",
+  plus: "+",
+  quest: "?",
+  quot: '"',
+  rpar: ")",
+  semi: ";",
+  sol: "/",
+  Tab: "\t",
+  NewLine: "\n",
+  amp: "&",
+};
+
+function decodeHtmlCharacterReferences(value) {
+  const sourceOffsets = [];
+  let decoded = "";
+  let sourceOffset = 0;
+  const characterReferencePattern =
+    /&(?:#(?:[xX][\da-fA-F]+|\d+)|[a-zA-Z][a-zA-Z\d]+);/g;
+
+  for (const match of value.matchAll(characterReferencePattern)) {
+    const precedingText = value.slice(sourceOffset, match.index);
+    decoded += precedingText;
+    for (let index = sourceOffset; index < match.index; index += 1) {
+      sourceOffsets.push(index);
+    }
+
+    const reference = match[0];
+    const numericMatch = reference.match(/^&#(?:[xX]([\da-fA-F]+)|(\d+));$/);
+    const namedReference = reference.slice(1, -1);
+    let replacement = Object.hasOwn(htmlCharacterReferences, namedReference)
+      ? htmlCharacterReferences[namedReference]
+      : undefined;
+    if (numericMatch) {
+      let codePoint = Number.parseInt(
+        numericMatch[1] ?? numericMatch[2],
+        numericMatch[1] ? 16 : 10,
+      );
+      if (
+        codePoint === 0 ||
+        codePoint > 0x10ffff ||
+        (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ) {
+        codePoint = 0xfffd;
+      } else if (codePoint >= 0x80 && codePoint <= 0x9f) {
+        codePoint = [
+          0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6,
+          0x2030, 0x160, 0x2039, 0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019,
+          0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a,
+          0x153, 0x9d, 0x17e, 0x178,
+        ][codePoint - 0x80];
+      }
+      replacement = String.fromCodePoint(codePoint);
+    }
+
+    if (replacement === undefined) {
+      decoded += reference;
+      for (let index = 0; index < reference.length; index += 1) {
+        sourceOffsets.push(match.index + index);
+      }
+    } else {
+      decoded += replacement;
+      for (let index = 0; index < replacement.length; index += 1) {
+        sourceOffsets.push(match.index);
+      }
+    }
+    sourceOffset = match.index + reference.length;
+  }
+
+  const trailingText = value.slice(sourceOffset);
+  decoded += trailingText;
+  for (let index = sourceOffset; index < value.length; index += 1) {
+    sourceOffsets.push(index);
+  }
+
+  return { value: decoded, sourceOffsets };
 }
 
 function stripCssComments(css) {
