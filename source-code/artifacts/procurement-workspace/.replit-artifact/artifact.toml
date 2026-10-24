@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "ProcureFlow"
+description = "A procurement workspace for small and medium-sized businesses to collect buying requirements, compare supplier offers, route selections for approval, and keep invoice records and recommendations."
+version = "1.0.0"
+id = "artifacts/procurement-workspace"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26224
+
+[services.development]
+run = "pnpm --filter @workspace/procurement-workspace run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/procurement-workspace", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/procurement-workspace/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26224"
+BASE_PATH = "/"
