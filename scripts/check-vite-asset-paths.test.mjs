@@ -163,6 +163,24 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("ignores remote and embedded URLs for typed object image, audio, and video data", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+        <object data="https://cdn.example.test/image.png" type="image/png"></object>
+        <object data="data:image/png;base64,AAAA" type="image/png"></object>
+        <object data="https://cdn.example.test/audio.mp3" type="audio/mpeg"></object>
+        <object data="data:audio/mpeg;base64,AAAA" type="audio/mpeg"></object>
+        <object data="https://cdn.example.test/video.mp4" type="video/mp4"></object>
+        <object data="data:video/mp4;base64,AAAA" type="video/mp4"></object>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("checks comma-separated srcset and imagesrcset candidates while ignoring external and data URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `
