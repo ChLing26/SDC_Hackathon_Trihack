@@ -145,7 +145,7 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
       const seenUrls = new Set();
       const embeddedDocuments = isStylesheet
         ? []
-        : collectStaticJavaScriptSrcdoc(content, source);
+        : collectStaticJavaScriptIframeDocuments(content, source);
       const javaScriptStringReferences = isStylesheet
         ? { references: [], ranges: [] }
         : collectJavaScriptStringAssetReferences(content);
@@ -971,17 +971,28 @@ function isPreviewOriginReference(reference, baseURL) {
   }
 }
 
-function collectStaticJavaScriptSrcdoc(source, codeSource) {
+function collectStaticJavaScriptIframeDocuments(source, codeSource) {
   const codeMask = maskJavaScriptLiterals(source);
   const bindings = collectStaticJavaScriptStringBindings(source);
-  const assignmentPatterns = [
-    /(?:\.\s*srcdoc\s*=\s*|\[\s*["']srcdoc["']\s*\]\s*=\s*)/gi,
-    /\.\s*setAttribute\s*\(\s*["']srcdoc["']\s*,\s*/gi,
+  const documentPatterns = [
+    {
+      pattern: /(?:\.\s*srcdoc\s*=\s*|\[\s*["']srcdoc["']\s*\]\s*=\s*)/gi,
+      label: "srcdoc",
+    },
+    {
+      pattern: /\.\s*setAttribute\s*\(\s*["']srcdoc["']\s*,\s*/gi,
+      label: "srcdoc",
+    },
+    {
+      pattern:
+        /(?:\.\s*contentDocument\s*\.\s*write\s*\(|\.\s*contentWindow\s*\.\s*document\s*\.\s*write\s*\()/gi,
+      label: "document.write",
+    },
   ];
   const documents = [];
   const seenAssignments = new Set();
 
-  for (const pattern of assignmentPatterns) {
+  for (const { pattern, label } of documentPatterns) {
     for (const match of source.matchAll(pattern)) {
       if (
         seenAssignments.has(match.index) ||
@@ -992,24 +1003,68 @@ function collectStaticJavaScriptSrcdoc(source, codeSource) {
       seenAssignments.add(match.index);
 
       const valueStart = match.index + match[0].length;
-      const expression = parseStaticJavaScriptStringExpression(
-        source,
-        valueStart,
-        bindings,
-      );
-      if (
-        !expression ||
-        !isStaticJavaScriptExpressionBoundary(source, expression.end)
-      ) {
-        continue;
+      let expressionEnd;
+      let embeddedHtml = "";
+      if (label === "document.write") {
+        let position = valueStart;
+        let hasArgument = false;
+        let isStatic = true;
+
+        while (position < source.length) {
+          const expression = parseStaticJavaScriptStringExpression(
+            source,
+            position,
+            bindings,
+          );
+          if (
+            !expression ||
+            !isStaticJavaScriptExpressionBoundary(source, expression.end)
+          ) {
+            isStatic = false;
+            break;
+          }
+
+          hasArgument = true;
+          embeddedHtml += expression.value;
+          position = expression.end;
+          while (
+            /\s/.test(source[position] ?? "") &&
+            position < source.length
+          ) {
+            position += 1;
+          }
+
+          if (source[position] === ",") {
+            position += 1;
+            continue;
+          }
+          if (source[position] === ")") expressionEnd = position + 1;
+          break;
+        }
+
+        if (!isStatic || !hasArgument || expressionEnd === undefined) continue;
+      } else {
+        const expression = parseStaticJavaScriptStringExpression(
+          source,
+          valueStart,
+          bindings,
+        );
+        if (
+          !expression ||
+          !isStaticJavaScriptExpressionBoundary(source, expression.end)
+        ) {
+          continue;
+        }
+        embeddedHtml = expression.value;
+        expressionEnd = expression.end;
       }
 
       const line = lineNumberAt(source, match.index);
       documents.push({
-        html: expression.value,
+        html: embeddedHtml,
         start: valueStart,
-        end: expression.end,
-        source: `${codeSource}:${line} iframe[srcdoc]`,
+        end: expressionEnd,
+        source: `${codeSource}:${line} iframe[${label}]`,
       });
     }
   }

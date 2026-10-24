@@ -849,6 +849,90 @@ frame.srcdoc = '<img src="' + getRuntimeAssetURL() + '">';`,
     );
   });
 
+  it("checks static iframe document.write markup and ignores external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.contentDocument.write(
+  '<img src="/preview/assets/written-frame.webp">',
+  '<link rel="stylesheet" href="/preview/assets/written-frame.css">',
+  '<img src="https://cdn.example.test/external.webp">',
+  '<img src="data:image/png;base64,AAAA">'
+);
+frame.contentWindow.document.write('<img src="/preview/assets/second-written-frame.svg">');`,
+    );
+    for (const file of [
+      "app.js",
+      "written-frame.webp",
+      "written-frame.css",
+      "second-written-frame.svg",
+    ]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing iframe document.write assets with the generated frame and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.contentDocument.write('<img src="/preview/assets/missing-written-frame.webp"><link rel="stylesheet" href="/preview/assets/missing-written-frame.css">');`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-written-frame\.webp" in assets\/app\.js:2 iframe\[document\.write\]:1 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-written-frame\.css" in assets\/app\.js:2 iframe\[document\.write\]:1 link\[href\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect prefixes in iframe document.write markup with the generated frame and URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const frame = document.querySelector("iframe");
+frame.contentWindow.document.write('<img src="/assets/wrong-written-frame.webp">');`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-written-frame\.webp" in assets\/app\.js:2 iframe\[document\.write\]:1 img\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("checks local assets in same-origin iframe pages relative to the iframe URL", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
