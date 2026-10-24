@@ -1,4 +1,3 @@
-<img width="1515" height="552" alt="WhatsApp Image 2026-10-25 at 12 17 28 AM" src="https://github.com/user-attachments/assets/77fe47d9-b97e-4b97-ade8-18970d78b93b" />
 ---
 
 # SmartSME Procurement
