@@ -874,6 +874,39 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("decodes standard named HTML references and preserves locations while ignoring external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<img src="/preview/assets/missing&NotEqualTilde;.webp">
+<img srcset="/preview/assets/missing-srcset&NotEqualTilde;.webp 1x">
+<img src="/preview/assets/missing&not.webp">
+<img src="https&colon;&sol;&sol;cdn.example.test/external.webp">
+<img src="data&colon;image&sol;png;base64,AAAA">`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing≂̸\.webp" in index\.html:2 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-srcset≂̸\.webp" in index\.html:3 img\[srcset\]/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing¬\.webp" in index\.html:4 img\[src\]/,
+        );
+        assert.doesNotMatch(error.message, /external\.webp|data:image/);
+        return true;
+      },
+    );
+  });
+
   it("reports entity-encoded wrong prefixes and ignores decoded external and data URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview&#47;assets&#47;app.js"></script>

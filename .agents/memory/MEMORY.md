@@ -7,3 +7,4 @@
 - [JavaScript responsive image paths](js-responsive-image-paths.md) — Keep extensionless srcset checks limited to static asset/media folders, excluding API paths that resemble image URLs.
 - [Temporary Vite preview servers](preview-asset-probes.md) — Stop pnpm-launched preview checks by process group so child servers cannot keep checks alive.
 - [Gemini request retries](gemini-request-retries.md) — Keep per-call retry limits explicit; the SDK can retry transient failures unless each request bounds attempts.
+- [Workspace package installs](workspace-package-installs.md) — The package-install helper rejects root pnpm dependencies; avoid undeclared transitive imports in root scripts.

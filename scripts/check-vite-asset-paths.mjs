@@ -44,6 +44,12 @@ const cssAssetExtensionPattern = new RegExp(
 );
 const cssImportReferencePattern =
   /@import\s+(?!url\s*\()\s*["']((?:\/|\.\.?\/)?[^"'\x60\s()<>;,]+?\.css(?:[?#][^"'\x60\s()<>;,]*)?)["']/gi;
+const htmlCharacterReferences = JSON.parse(
+  readFileSync(
+    new URL("./html-character-references.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 function readManifestPaths(manifestPath, cwd = process.cwd()) {
   const manifest = readFileSync(resolve(cwd, manifestPath), "utf8");
@@ -1296,56 +1302,36 @@ function collectInlineStyleReferences(html, sourcePrefix, resolveFrom) {
   return references;
 }
 
-const htmlCharacterReferences = {
-  AMP: "&",
-  apos: "'",
-  ast: "*",
-  colon: ":",
-  commat: "@",
-  dollar: "$",
-  equals: "=",
-  excl: "!",
-  gt: ">",
-  GT: ">",
-  hyphen: "-",
-  lpar: "(",
-  lt: "<",
-  LT: "<",
-  lowbar: "_",
-  num: "#",
-  percnt: "%",
-  period: ".",
-  plus: "+",
-  quest: "?",
-  quot: '"',
-  rpar: ")",
-  semi: ";",
-  sol: "/",
-  Tab: "\t",
-  NewLine: "\n",
-  amp: "&",
-};
-
 function decodeHtmlCharacterReferences(value) {
   const sourceOffsets = [];
   let decoded = "";
   let sourceOffset = 0;
-  const characterReferencePattern =
-    /&(?:#(?:[xX][\da-fA-F]+|\d+)|[a-zA-Z][a-zA-Z\d]+);/g;
 
-  for (const match of value.matchAll(characterReferencePattern)) {
-    const precedingText = value.slice(sourceOffset, match.index);
-    decoded += precedingText;
-    for (let index = sourceOffset; index < match.index; index += 1) {
+  const appendOriginal = (start, end) => {
+    decoded += value.slice(start, end);
+    for (let index = start; index < end; index += 1) {
       sourceOffsets.push(index);
     }
+  };
 
-    const reference = match[0];
-    const numericMatch = reference.match(/^&#(?:[xX]([\da-fA-F]+)|(\d+));$/);
-    const namedReference = reference.slice(1, -1);
-    let replacement = Object.hasOwn(htmlCharacterReferences, namedReference)
-      ? htmlCharacterReferences[namedReference]
-      : undefined;
+  const appendReplacement = (replacement, referenceOffset) => {
+    decoded += replacement;
+    for (let index = 0; index < replacement.length; index += 1) {
+      sourceOffsets.push(referenceOffset);
+    }
+  };
+
+  while (sourceOffset < value.length) {
+    const ampersandOffset = value.indexOf("&", sourceOffset);
+    if (ampersandOffset === -1) {
+      appendOriginal(sourceOffset, value.length);
+      break;
+    }
+
+    appendOriginal(sourceOffset, ampersandOffset);
+    const numericMatch = value
+      .slice(ampersandOffset)
+      .match(/^&#(?:[xX]([\da-fA-F]+)|(\d+));?/);
     if (numericMatch) {
       let codePoint = Number.parseInt(
         numericMatch[1] ?? numericMatch[2],
@@ -1365,27 +1351,34 @@ function decodeHtmlCharacterReferences(value) {
           0x153, 0x9d, 0x17e, 0x178,
         ][codePoint - 0x80];
       }
-      replacement = String.fromCodePoint(codePoint);
+      appendReplacement(String.fromCodePoint(codePoint), ampersandOffset);
+      sourceOffset = ampersandOffset + numericMatch[0].length;
+      continue;
     }
 
-    if (replacement === undefined) {
-      decoded += reference;
-      for (let index = 0; index < reference.length; index += 1) {
-        sourceOffsets.push(match.index + index);
-      }
-    } else {
-      decoded += replacement;
-      for (let index = 0; index < replacement.length; index += 1) {
-        sourceOffsets.push(match.index);
-      }
+    let nameEnd = ampersandOffset + 1;
+    while (/[a-zA-Z\d]/.test(value[nameEnd] ?? "")) {
+      nameEnd += 1;
     }
-    sourceOffset = match.index + reference.length;
-  }
 
-  const trailingText = value.slice(sourceOffset);
-  decoded += trailingText;
-  for (let index = sourceOffset; index < value.length; index += 1) {
-    sourceOffsets.push(index);
+    const name = value.slice(ampersandOffset + 1, nameEnd);
+    const hasSemicolon = value[nameEnd] === ";";
+    const namedReference = hasSemicolon ? `${name};` : name;
+    const replacement = Object.hasOwn(htmlCharacterReferences, namedReference)
+      ? htmlCharacterReferences[namedReference]
+      : undefined;
+    const followingCharacter = value[nameEnd + (hasSemicolon ? 1 : 0)] ?? "";
+    const isValidLegacyReference =
+      hasSemicolon || !/[a-zA-Z\d=]/.test(followingCharacter);
+
+    if (name && replacement !== undefined && isValidLegacyReference) {
+      appendReplacement(replacement, ampersandOffset);
+      sourceOffset = nameEnd + (hasSemicolon ? 1 : 0);
+      continue;
+    }
+
+    appendOriginal(ampersandOffset, ampersandOffset + 1);
+    sourceOffset = ampersandOffset + 1;
   }
 
   return { value: decoded, sourceOffsets };
