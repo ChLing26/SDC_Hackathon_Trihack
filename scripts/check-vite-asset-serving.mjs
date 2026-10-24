@@ -326,32 +326,35 @@ export async function checkServedAssets(
   const assetPaths = expectedAssetPaths(builtHtml);
 
   for (const type of Object.keys(assetTypes)) {
-    const assetPath = assetPaths[type][0];
-    if (!assetPath) {
+    const assetPathsToCheck =
+      type === "media" ? assetPaths[type] : [assetPaths[type][0]];
+    if (!assetPathsToCheck[0]) {
       throw new Error(
         `${app.name} build output has no ${assetTypes[type].label} URL to verify.`,
       );
     }
 
-    const resolvedAssetUrl = new URL(assetPath, nestedPage.responseUrl);
-    if (
-      resolvedAssetUrl.origin !== new URL(origin).origin ||
-      !resolvedAssetUrl.pathname.startsWith(normalizedBasePath)
-    ) {
-      throw new Error(
-        `${app.name} ${assetTypes[type].label} URL "${assetPath}" does not resolve beneath configured preview path "${normalizedBasePath}" from the nested route.`,
-      );
-    }
+    for (const assetPath of assetPathsToCheck) {
+      const resolvedAssetUrl = new URL(assetPath, nestedPage.responseUrl);
+      if (
+        resolvedAssetUrl.origin !== new URL(origin).origin ||
+        !resolvedAssetUrl.pathname.startsWith(normalizedBasePath)
+      ) {
+        throw new Error(
+          `${app.name} ${assetTypes[type].label} URL "${assetPath}" does not resolve beneath configured preview path "${normalizedBasePath}" from the nested route.`,
+        );
+      }
 
-    let response;
-    try {
-      response = await fetchImpl(resolvedAssetUrl);
-    } catch (error) {
-      throw new Error(
-        `${app.name} ${assetTypes[type].label} request ${resolvedAssetUrl.href} failed: ${error.message}`,
-      );
+      let response;
+      try {
+        response = await fetchImpl(resolvedAssetUrl);
+      } catch (error) {
+        throw new Error(
+          `${app.name} ${assetTypes[type].label} request ${resolvedAssetUrl.href} failed: ${error.message}`,
+        );
+      }
+      assertResponse(response, type, resolvedAssetUrl.href, app.name);
     }
-    assertResponse(response, type, resolvedAssetUrl.href, app.name);
   }
 
   const responsiveImageUrls = new Set();

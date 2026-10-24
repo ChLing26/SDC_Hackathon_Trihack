@@ -380,6 +380,45 @@ new SharedWorker("/__mockup/assets/shared-worker.js");`,
     );
   });
 
+  it("fails when a secondary ordinary media request returns an HTTP error", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath),
+      `<script type="module" src="/__mockup/assets/app.js"></script>
+<link rel="stylesheet" href="/__mockup/assets/app.css">
+<link rel="icon" href="/__mockup/assets/icon.svg">
+<video poster="/__mockup/assets/poster.png"></video>`,
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname);
+      if (url.pathname === "/__mockup/assets/poster.png") {
+        return response("missing", "text/plain", 404);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas media request .*poster\.png.* returned HTTP 404/,
+    );
+
+    assert.ok(requests.includes("/__mockup/assets/icon.svg"));
+    assert.ok(requests.includes("/__mockup/assets/poster.png"));
+  });
+
   it("requests local srcset and imagesrcset candidates beneath the configured preview path", async () => {
     const app = makeBuiltApp();
     writeFileSync(
