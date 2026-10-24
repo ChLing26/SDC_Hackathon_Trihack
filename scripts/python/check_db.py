@@ -2,9 +2,9 @@
 import sqlite3
 from pathlib import Path
 
-# Find the database inside the src folder
+# Find the database at its unchanged workspace-root-relative location.
 db_path = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[2]
     / "src"
     / "business_supplier_selection.db"
 )

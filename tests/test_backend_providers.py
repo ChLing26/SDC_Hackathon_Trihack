@@ -9,9 +9,9 @@ import httpx
 from google import genai
 from google.genai import errors, types
 
-import ai_advisor
-from ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
-from distance import get_distance
+import src.services.ai_advisor as ai_advisor
+from src.services.ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
+from src.services.distance import get_distance
 
 SUPPLIERS = [{
     "name": "Fixture", "product_price_rm": 20, "shipping_rm": 5,
@@ -56,7 +56,7 @@ class ProviderChecks(unittest.TestCase):
             candidates=[],
         )
 
-        with patch("ai_advisor.client", client):
+        with patch("src.services.ai_advisor.client", client):
             advice = get_smart_advice(suppliers, budget=30, max_delivery_days=3)
 
         self.assertIn("Only the following quotes meet both requirements", advice)
@@ -75,7 +75,7 @@ class ProviderChecks(unittest.TestCase):
             candidates=[],
         )
 
-        with patch("ai_advisor.client", client):
+        with patch("src.services.ai_advisor.client", client):
             advice = get_smart_advice(
                 [dict(SUPPLIERS[0], quote_id="fixture-quote")],
                 budget=10,
@@ -89,14 +89,14 @@ class ProviderChecks(unittest.TestCase):
         self.assertNotIn("Recommend Fixture", advice)
 
     def test_missing_gemini_configuration_raises(self):
-        with patch("ai_advisor.client", None):
+        with patch("src.services.ai_advisor.client", None):
             with self.assertRaises(AIConfigurationError):
                 get_smart_advice(SUPPLIERS, 30, 3)
 
     def test_empty_and_failed_gemini_response_is_sanitized(self):
         client = Mock()
         client.models.generate_content.return_value.text = ""
-        with patch("ai_advisor.client", client):
+        with patch("src.services.ai_advisor.client", client):
             with self.assertRaisesRegex(GeminiProviderError, "^Gemini advice is temporarily unavailable.$") as empty:
                 get_smart_advice(SUPPLIERS, 30, 3)
             self.assertEqual((empty.exception.category, empty.exception.http_status), ("provider", 502))
@@ -193,7 +193,7 @@ class ProviderChecks(unittest.TestCase):
 
     def test_advice_api_survives_provider_failures_and_recovers(self):
         from fastapi.testclient import TestClient
-        from api import app
+        from src.api.advice import app
 
         token = "offline-fixture-private-service-token"
         headers = {"Authorization": "Bearer " + token}
@@ -258,7 +258,7 @@ class ProviderChecks(unittest.TestCase):
                     with (
                         patch.object(ai_advisor, "client", sdk_client),
                         patch(
-                            "src.backend_security.configured_service_token",
+                            "src.api.security.configured_service_token",
                             return_value=token,
                         ),
                         TestClient(app) as client,
@@ -347,7 +347,7 @@ class ProviderChecks(unittest.TestCase):
             sdk_client.close()
 
     def test_nonfinite_ai_data_is_rejected_before_network(self):
-        with patch("ai_advisor.client") as client:
+        with patch("src.services.ai_advisor.client") as client:
             for supplier in (
                 {**SUPPLIERS[0], "product_price_rm": float("nan")},
                 {**SUPPLIERS[0], "shipping_rm": float("inf")},
@@ -357,7 +357,7 @@ class ProviderChecks(unittest.TestCase):
             client.models.generate_content.assert_not_called()
 
     def test_invalid_coordinates_do_not_call_osrm(self):
-        with patch("distance.requests.get") as request:
+        with patch("src.services.distance.requests.get") as request:
             for coordinates in ((0, 91), (181, 0), (float("nan"), 0), (1,), "bad"):
                 with self.assertRaises(ValueError):
                     get_distance(coordinates, (101, 3))
@@ -370,6 +370,6 @@ class ProviderChecks(unittest.TestCase):
             {"distance": float("inf"), "duration": 10},
         ):
             response.json.return_value = {"code": "Ok", "routes": [route]}
-            with patch("distance.requests.get", return_value=response):
+            with patch("src.services.distance.requests.get", return_value=response):
                 with self.assertRaises(ValueError):
                     get_distance((101, 3), (102, 4))

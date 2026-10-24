@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.backend_database import (
+from src.database.connection import (
     SNAPSHOT, configured_database_path, database_connection, open_database,
 )
 import test_backend_integration as fixtures
@@ -32,18 +32,19 @@ PAYLOAD = {
 
 @contextmanager
 def emergency_client():
-    from src import emergency_orders
+    from src.api import emergency as emergency_api
+    from src.database import emergency as emergency_database
     with tempfile.TemporaryDirectory() as directory:
         filename = str(Path(directory) / "runtime.db")
         fixtures.BackendRuntimeChecks().make_catalogue(filename)
-        with patch.object(emergency_orders, "DB_NAME", filename):
-            with TestClient(emergency_orders.app) as client:
+        with patch.object(emergency_database, "DB_NAME", filename):
+            with TestClient(emergency_api.app) as client:
                 yield client
 
 
 class AuthenticationChecks(unittest.TestCase):
     def test_both_apis_fail_closed_without_configuration(self):
-        from api import app
+        from src.api.advice import app
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": ""}):
             with TestClient(app) as client:
                 self.assertEqual(client.post("/supplier-advice", json=PAYLOAD).status_code, 503)
@@ -51,7 +52,7 @@ class AuthenticationChecks(unittest.TestCase):
                 self.assertEqual(client.get("/emergency-purchases").status_code, 503)
 
     def test_missing_wrong_and_query_credentials_are_rejected(self):
-        from api import app
+        from src.api.advice import app
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
             with TestClient(app) as client:
                 for headers in ({}, {"Authorization": "Bearer invalid"},
@@ -75,10 +76,10 @@ class AuthenticationChecks(unittest.TestCase):
                     )
 
     def test_valid_private_service_can_validate_and_decide_fixture_purchase(self):
-        from api import app
+        from src.api.advice import app
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
             with TestClient(app) as client, patch(
-                "api.get_smart_advice", return_value="Fixture advice",
+                "src.services.advice.get_smart_advice", return_value="Fixture advice",
             ):
                 response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
                 self.assertEqual(response.status_code, 200)
@@ -102,7 +103,7 @@ class AuthenticationChecks(unittest.TestCase):
                 ).json()["status"], "Approved")
 
     def test_no_browser_cors_or_public_schema(self):
-        from api import app
+        from src.api.advice import app
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
             with TestClient(app) as client:
                 for route in ("/docs", "/redoc", "/openapi.json"):
@@ -114,9 +115,9 @@ class AuthenticationChecks(unittest.TestCase):
                 self.assertNotIn("access-control-allow-origin", response.headers)
 
     def test_invalid_input_is_rejected_before_ai(self):
-        from api import app
+        from src.api.advice import app
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
-            with TestClient(app) as client, patch("api.get_smart_advice") as advice:
+            with TestClient(app) as client, patch("src.services.advice.get_smart_advice") as advice:
                 for payload in (
                     {**PAYLOAD, "budget": -1},
                     {**PAYLOAD, "budget": "NaN"},
@@ -131,8 +132,8 @@ class AuthenticationChecks(unittest.TestCase):
                 advice.assert_not_called()
 
     def test_missing_key_and_provider_failure_are_not_success(self):
-        from api import app
-        import ai_advisor
+        from src.api.advice import app
+        import src.services.ai_advisor as ai_advisor
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
             with TestClient(app) as client, patch.object(ai_advisor, "client", None):
                 response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
@@ -142,7 +143,7 @@ class AuthenticationChecks(unittest.TestCase):
                 })
                 self.assertEqual(response.json()["suppliers"][0]["total_cost_rm"], 25)
             with TestClient(app) as client, patch(
-                "api.get_smart_advice", side_effect=RuntimeError("private-provider-detail"),
+                "src.services.advice.get_smart_advice", side_effect=RuntimeError("private-provider-detail"),
             ):
                 response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
                 self.assertEqual(response.json()["ai_status"], "failed")
@@ -152,8 +153,8 @@ class AuthenticationChecks(unittest.TestCase):
                 })
 
     def test_safe_provider_categories_and_statuses_never_include_raw_details(self):
-        from api import app
-        from ai_advisor import GeminiProviderError
+        from src.api.advice import app
+        from src.services.ai_advisor import GeminiProviderError
         cases = (
             ("quota", 429), ("permission", 403), ("model", 404),
             ("timeout", 504), ("provider", 502),
@@ -161,7 +162,7 @@ class AuthenticationChecks(unittest.TestCase):
         with patch.dict(os.environ, {"PYTHON_BACKEND_TOKEN": TOKEN}):
             for category, status in cases:
                 with self.subTest(category=category), TestClient(app) as client, patch(
-                    "api.get_smart_advice",
+                    "src.services.advice.get_smart_advice",
                     side_effect=GeminiProviderError(category, status),
                 ):
                     response = client.post("/supplier-advice", headers=HEADERS, json=PAYLOAD)
@@ -180,7 +181,7 @@ class AuthenticationChecks(unittest.TestCase):
                     self.assertEqual(body["suppliers"][0]["total_cost_rm"], 25)
                     self.assertEqual(body["suppliers"][0]["within_budget"], True)
 
-        from ai_advisor import classify_gemini_error
+        from src.services.ai_advisor import classify_gemini_error
         unsafe = classify_gemini_error(type("ProviderError", (Exception,), {"code": 799})("sensitive body"))
         self.assertEqual((unsafe.category, unsafe.http_status), ("provider", 502))
 
@@ -194,7 +195,7 @@ class DatabaseAndEntryPointChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run([
                 sys.executable, "-c",
-                "from src.backend_database import configured_database_path; "
+                "from src.database.connection import configured_database_path; "
                 "print(configured_database_path())",
             ], cwd=directory, env={
                 **os.environ, "PYTHONPATH": str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""),
@@ -215,7 +216,7 @@ class DatabaseAndEntryPointChecks(unittest.TestCase):
                     connection.execute("CREATE TABLE forbidden_write (id INTEGER)")
 
     def test_wrong_or_missing_database_does_not_silently_initialize(self):
-        from src import emergency_orders
+        from src.database import emergency as emergency_database
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "missing.db"
             with self.assertRaises(sqlite3.OperationalError):
@@ -223,12 +224,12 @@ class DatabaseAndEntryPointChecks(unittest.TestCase):
             self.assertFalse(path.exists())
             with sqlite3.connect(path):
                 pass
-            with patch.object(emergency_orders, "DB_NAME", str(path)):
+            with patch.object(emergency_database, "DB_NAME", str(path)):
                 with self.assertRaisesRegex(RuntimeError, "supplier catalogue"):
-                    emergency_orders.initialize_database()
+                    emergency_database.initialize_database()
 
     def test_recommendation_parameter_does_not_execute_sql(self):
-        from src import database_w_input as catalogue
+        from src.services import catalogue
         with patch.object(catalogue, "DB_NAME", str(SNAPSHOT)):
             self.assertEqual(catalogue.get_supplier_recommendations(
                 1, "'; DROP TABLE supplier_offers; --", 10,
@@ -257,4 +258,4 @@ class DatabaseAndEntryPointChecks(unittest.TestCase):
             from src.main import main
             main()
             self.assertEqual(run.call_args.kwargs["host"], "127.0.0.1")
-            self.assertEqual(run.call_args.args[0], "api:app")
+            self.assertEqual(run.call_args.args[0], "src.api.advice:app")

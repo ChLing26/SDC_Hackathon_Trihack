@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import sqlite3
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "src/business_supplier_selection.db"
 BACKUPS = ROOT / "backups"
 CATALOGUE_TABLES = {

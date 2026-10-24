@@ -20,9 +20,10 @@ not activate an adapter or change the live database.
   application, accounts, and signed invoices.
 - The existing buyer/account and supplier-signature evidence and PDF exporter
   are unchanged by the backend import.
-- Root Python modules and `src/` retain the imported backend implementation.
-  They are not automatically exposed through the application's proxy or
-  connected to its request/invoice mutations.
+- The private Python backend is organized under `src/api`, `src/models`,
+  `src/services`, and `src/database`; `src/main.py` remains its launcher and the
+  root `main.py` remains a compatibility wrapper. These routes are not exposed
+  through the application's proxy or connected to its request/invoice mutations.
 
 This separation is intentional. The FastAPI routes require private service
 authentication, not the existing browser account/session model. Exposing them or
@@ -34,11 +35,14 @@ decision first. A service token alone does not identify a buyer or manager.
 
 | Component | Source |
 | --- | --- |
-| Supplier advice and anomaly rules | `api.py` |
-| Gemini request construction | `ai_advisor.py` |
-| OSRM road-distance calculation | `distance.py` |
-| SQLite catalogue and supplier ranking | `src/database_w_input.py` |
-| Emergency selection and approval records | `src/emergency_orders.py` |
+| Supplier advice API | `src/api/advice.py` |
+| Advice request models | `src/models/advice.py` |
+| Advice orchestration and anomaly rules | `src/services/advice.py`, `src/services/anomalies.py` |
+| Gemini request construction | `src/services/ai_advisor.py` |
+| OSRM distance and location utilities | `src/services/distance.py`, `src/services/location.py` |
+| SQLite catalogue data access and supplier ranking | `src/database/catalogue.py`, `src/services/catalogue.py` |
+| Emergency API, selection, and approval records | `src/api/emergency.py`, `src/services/emergency.py`, `src/database/emergency.py`, `src/models/emergency.py` |
+| Opt-in interactive catalogue demo | `scripts/python/catalogue_demo.py` |
 | Existing SQLite snapshots | `src/business_supplier_selection.db`, `backups/business_supplier_selection_backup.db` |
 
 The SQLite snapshots are historical/sample backend data, not a replacement for
@@ -52,8 +56,8 @@ pnpm run typecheck
 pnpm --filter @workspace/procurement-workspace test
 python tests/run_isolated_application_tests.py
 python -m unittest discover -s tests -p 'test_backend_*.py' -v
-python test_anomalies.py
-python test_recommedation.py
+python -m unittest discover -s tests -p 'test_anomalies.py' -v
+python -m unittest discover -s tests -p 'test_recommendation.py' -v
 python -m pip check
 ```
 
@@ -70,11 +74,16 @@ use temporary SQLite fixtures, fixture service credentials and mocked Gemini/OSR
 calls. Two loopback HTTP tests start actual private Uvicorn processes. No tests
 modify the tracked SQLite databases or invoke a paid model.
 
-The anomaly script remains available. The recommendation script now seeds an
+The anomaly and recommendation checks are under `tests/`. The recommendation
+test seeds an
 isolated deterministic fixture and asserts quantity, shipping, ranking and
 business isolation. Previously it queried business 1, while successful sample
 routes belonged to businesses 3/4, and printed an empty result as success.
 Assertions and exceptions now exit nonzero.
+
+The interactive catalogue demo is separate from the test suite. It can perform
+geocoding and OSRM requests and writes catalogue records, so only run it with an
+explicit disposable SQLite file.
 
 ## Python installation and private startup
 
@@ -139,9 +148,8 @@ These are integration prerequisites, not a full production security certificatio
 - Gemini is optional for deterministic validation. Missing `GEMINI_API_KEY`
   produces `ai_status=unavailable`, not false AI success. Empty/provider-failed
   responses produce failure status without logging upstream bodies or secrets.
-- `GEMINI_MODEL` can select a provider-supported model; the default is
-  `gemini-flash-latest`, replacing the unverified `gemini-3.8-flash` identifier.
-  The client has a 15-second request timeout.
+- `GEMINI_MODEL` can select a provider-supported model; the source-code default
+  is `gemini-flash-latest`. The client has a 15-second request timeout.
 - Live Gemini generation, model availability, and quota remain **unverified**.
   No provider was switched or newly provisioned.
 - A live public OSRM KL-to-Shah-Alam route probe succeeded: 25.21 km, 23.8 minutes.
@@ -155,7 +163,7 @@ These are integration prerequisites, not a full production security certificatio
 - There is still a syntax error at line 1 of the inherited
   `backups/ai_advisor_backup.py`, which contains pasted shell commands. It is
   preserved verbatim as a historical backup, not treated as an executable entry
-  point. Active `ai_advisor.py` is the supported implementation.
+  point. `src/services/ai_advisor.py` is the active implementation.
 - Live Gemini verification requires a securely configured credential and
   confirmed model/quota. Missing configuration is not a test pass.
 - The upstream Starlette TestClient warns that its current httpx compatibility

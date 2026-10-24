@@ -1,5 +1,10 @@
 # Backend integration review
 
+> Historical review snapshot: commit references, test results, and source paths
+> below describe the state at review time. For the current Python directory
+> layout and current verification commands, see
+> [repository-integration.md](repository-integration.md).
+
 ## Scope and change boundary
 
 Reviewed on `integration/backend-review-20261023`, based on local commit

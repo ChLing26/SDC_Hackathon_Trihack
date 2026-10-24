@@ -9,13 +9,7 @@ from secrets import compare_digest
 
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict
-
 bearer = HTTPBearer(auto_error=False)
-
-
-class RequestModel(BaseModel):
-    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
 
 
 def configured_service_token():

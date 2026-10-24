@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 import httpx
 from google import genai
 from google.genai import errors, types
-from src.backend_numbers import MAX_MONEY, bounded_decimal, checked_total
+from src.services.numbers import MAX_MONEY, bounded_decimal, checked_total
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = BASE_DIR / ".env"
 
 # Load local .env if available.

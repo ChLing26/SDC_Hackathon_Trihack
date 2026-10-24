@@ -16,7 +16,7 @@ def main():
         print("BLOCKED: live Gemini probe requires explicit RUN_LIVE_GEMINI_TEST=1.")
         return 77
     try:
-        import ai_advisor
+        import src.services.ai_advisor as ai_advisor
         if ai_advisor.client is None:
             print("BLOCKED: Gemini credential is not configured; no request sent.")
             return 77

@@ -4,14 +4,17 @@ Shared procurement workspace for SME buying teams, with persistent email-and-pas
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the Express API server (port 8080)
+- `pnpm --filter @workspace/procurement-workspace run dev` — run the React/Vite frontend
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/db run migrate` — repeatable procurement and account/session schema setup plus legacy secret-table cleanup; also runs after task merges
 - `pnpm --filter @workspace/api-server test` — account/session API checks plus isolated empty-schema bootstrap, procurement workflow, and process-restart checks (cleans up its own data)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — PostgreSQL connection for the Express application.
+  The private Python services also require `PYTHON_BACKEND_TOKEN`; optional
+  Python settings are `GEMINI_API_KEY`, `GEMINI_MODEL`, and `PYTHON_SQLITE_PATH`.
 
 ## Stack
 
@@ -24,7 +27,16 @@ Shared procurement workspace for SME buying teams, with persistent email-and-pas
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/procurement-workspace/` — React/Vite application.
+- `artifacts/api-server/` — Express API, accounts, PostgreSQL workflows, approvals,
+  signatures, and PDF invoices.
+- `lib/` — shared API contracts, database, and integration packages.
+- `src/api/`, `src/models/`, `src/services/`, `src/database/` — private Python
+  FastAPI routes, validation models, procurement logic, and SQLite data access.
+- `scripts/python/` — opt-in Python utilities and the interactive catalogue demo.
+- `tests/` and `docs/` — regression checks and project documentation.
+- `source-code/` remains a tracked submission copy; active source files are in
+  the workspace paths above.
 
 ## Architecture decisions
 

@@ -11,12 +11,12 @@ def main() -> None:
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
 
-    from src.backend_security import configured_service_token
+    from src.api.security import configured_service_token
     if configured_service_token() is None:
         parser.error("Configure PYTHON_BACKEND_TOKEN (at least 32 characters) before starting.")
 
     import uvicorn
-    module = "api:app" if args.service == "advice" else "src.emergency_orders:app"
+    module = "src.api.advice:app" if args.service == "advice" else "src.api.emergency:app"
     # Deliberately private: no public artifact route or browser CORS permission.
     uvicorn.run(module, host="127.0.0.1", port=args.port)
 

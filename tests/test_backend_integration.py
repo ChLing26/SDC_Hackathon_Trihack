@@ -34,7 +34,8 @@ class SnapshotChecks(unittest.TestCase):
         # It is not an executable module and must remain byte-for-byte intact.
         files = [
             *ROOT.glob("*.py"),
-            *ROOT.joinpath("src").glob("*.py"),
+            *ROOT.joinpath("src").rglob("*.py"),
+            *ROOT.joinpath("scripts/python").rglob("*.py"),
             ROOT / "backups/database_w_input_backup.py",
         ]
         self.assertGreater(len(files), 0)
@@ -76,7 +77,8 @@ class SnapshotChecks(unittest.TestCase):
 @unittest.skipIf(bool(MISSING), "Missing backend packages: " + ", ".join(MISSING))
 class BackendRuntimeChecks(unittest.TestCase):
     def test_anomaly_rules(self):
-        from api import Supplier, detect_anomalies
+        from src.models.advice import Supplier
+        from src.services.anomalies import detect_anomalies
 
         suppliers = [
             Supplier(
@@ -96,7 +98,8 @@ class BackendRuntimeChecks(unittest.TestCase):
         })
 
     def test_advice_excludes_failed_routes_and_recalculates_totals(self):
-        from api import AdviceRequest, Supplier, supplier_advice
+        from src.api.advice import supplier_advice
+        from src.models.advice import AdviceRequest, Supplier
 
         request = AdviceRequest(
             suppliers=[
@@ -111,36 +114,37 @@ class BackendRuntimeChecks(unittest.TestCase):
             ],
             budget=30, max_delivery_days=3,
         )
-        with patch("api.get_smart_advice", return_value="Mock advice") as advice:
+        with patch("src.services.advice.get_smart_advice", return_value="Mock advice") as advice:
             result = supplier_advice(request)
         self.assertEqual(result["suppliers"][0]["total_cost_rm"], 25)
         self.assertEqual(result["ai_status"], "success")
         self.assertEqual(len(advice.call_args.kwargs["suppliers"]), 1)
 
     def test_distance_units_with_mocked_osrm(self):
-        from distance import get_distance
+        from src.services.distance import get_distance
 
         response = Mock()
         response.json.return_value = {
             "code": "Ok", "routes": [{"distance": 12345, "duration": 600}],
         }
-        with patch("distance.requests.get", return_value=response) as request:
+        with patch("src.services.distance.requests.get", return_value=response) as request:
             self.assertEqual(get_distance((101, 3), (102, 4)), {
                 "distance_km": 12.35, "duration_minutes": 10.0,
             })
         response.raise_for_status.assert_called_once()
         self.assertEqual(request.call_args.kwargs["timeout"], 20)
         response.json.return_value = {"code": "NoRoute", "routes": []}
-        with patch("distance.requests.get", return_value=response):
+        with patch("src.services.distance.requests.get", return_value=response):
             with self.assertRaises(ValueError):
                 get_distance((101, 3), (102, 4))
 
     def make_catalogue(self, filename):
-        from src import database_w_input as catalogue
+        from src.database import catalogue as catalogue_database
+        from src.services import catalogue
 
-        with patch.object(catalogue, "DB_NAME", filename):
+        with patch.object(catalogue_database, "DB_NAME", filename):
             with contextlib.redirect_stdout(io.StringIO()):
-                catalogue.create_database()
+                catalogue_database.create_database()
         with sqlite3.connect(filename) as connection:
             connection.executescript("""
                 INSERT INTO businesses VALUES (1, 'Fixture business', 'Fixture', 3, 101);
@@ -167,32 +171,36 @@ class BackendRuntimeChecks(unittest.TestCase):
 
     def test_emergency_selection_and_decision_use_isolated_database(self):
         from fastapi import HTTPException
-        from src import emergency_orders as emergency
+        from src.database import emergency as emergency_database
+        from src.models.emergency import EmergencyPurchaseRequest, PurchaseDecision
+        from src.services import emergency
 
         with tempfile.TemporaryDirectory() as temporary:
             filename = str(Path(temporary) / "emergency.db")
             self.make_catalogue(filename)
-            with patch.object(emergency, "DB_NAME", filename):
-                emergency.initialize_database()
+            with patch.object(emergency_database, "DB_NAME", filename):
+                emergency_database.initialize_database()
                 result = emergency.create_emergency_purchase(
-                    emergency.EmergencyPurchaseRequest(
+                    EmergencyPurchaseRequest(
                         business_id=1, item_name="Fixture pens", quantity=10,
                         required_delivery_time=time(18), max_distance_km=20,
                     ),
                 )
                 self.assertEqual(result["status"], "Pending Approval")
                 self.assertEqual(result["total_cost_rm"], 25)
-                decision = emergency.PurchaseDecision(decision="Approved")
+                decision = PurchaseDecision(decision="Approved")
                 emergency.decide_purchase(result["purchase_id"], decision)
                 self.assertEqual(
-                    emergency.get_purchase(result["purchase_id"])["status"], "Approved",
+                    emergency.get_emergency_purchase(
+                        result["purchase_id"],
+                    )["status"], "Approved",
                 )
                 with self.assertRaises(HTTPException) as error:
                     emergency.decide_purchase(result["purchase_id"], decision)
                 self.assertEqual(error.exception.status_code, 409)
 
     def test_gemini_request_without_live_network(self):
-        import ai_advisor
+        import src.services.ai_advisor as ai_advisor
 
         client = Mock()
         client.models.generate_content.return_value.text = "Fixture advice"
