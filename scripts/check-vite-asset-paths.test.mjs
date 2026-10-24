@@ -997,6 +997,62 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("resolves present image and font URLs from an imported nested stylesheet", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Nested CSS Present",
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const nestedStylesheetDirectory = join(assetsDirectory, "css", "themes");
+    mkdirSync(join(assetsDirectory, "css", "images"), { recursive: true });
+    mkdirSync(join(assetsDirectory, "css", "fonts"), { recursive: true });
+    mkdirSync(nestedStylesheetDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "styles.css"), '@import url("./css/themes/dark.css");');
+    writeFileSync(
+      join(nestedStylesheetDirectory, "dark.css"),
+      '.hero { background-image: url("../images/hero.webp"); } @font-face { src: url("../fonts/display.woff2"); }',
+    );
+    writeFileSync(join(assetsDirectory, "css", "images", "hero.webp"), "");
+    writeFileSync(join(assetsDirectory, "css", "fonts", "display.woff2"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing image and font URLs with their nested stylesheet source", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Nested CSS Missing",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const nestedStylesheetDirectory = join(assetsDirectory, "css", "themes");
+    mkdirSync(nestedStylesheetDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "styles.css"), '@import url("./css/themes/dark.css");');
+    writeFileSync(
+      join(nestedStylesheetDirectory, "dark.css"),
+      '.hero { background-image: url("../images/missing-hero.webp"); } @font-face { src: url("../fonts/missing-display.woff2"); }',
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\.\.\/images\/missing-hero\.webp" in assets\/css\/themes\/dark\.css/,
+        );
+        assert.match(
+          error.message,
+          /"\.\.\/fonts\/missing-display\.woff2" in assets\/css\/themes\/dark\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("checks local CSS files imported with url() while ignoring external imports", () => {
     const { app, outputDirectory } = createApp({
       html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
