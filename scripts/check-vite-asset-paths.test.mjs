@@ -43,6 +43,72 @@ BASE_PATH = "${basePath.slice(0, -1)}"
 }
 
 describe("Vite preview asset paths", () => {
+  it("accepts Vite dependency tables and library strings without inventing asset URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assets = join(outputDirectory, "assets");
+    mkdirSync(assets, { recursive: true });
+    writeFileSync(join(assets, "app.js"), `
+      const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunk.js","assets/style.css"])))=>i.map(i=>d[i]);
+      import("./chunk.js");
+      const userAgent = "Node.js/";
+      const viewer = options.pdfJsUrl || "examples/PDF.js/web/viewer.html";
+      const pdfImage = "/Image";
+      const pdfResources = "/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]";
+    `);
+    writeFileSync(join(assets, "chunk.js"), "");
+    writeFileSync(join(assets, "style.css"), "");
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("still rejects missing Vite dependency-map chunks and stylesheets", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), `
+      const __vite__mapDeps = (i, m = __vite__mapDeps, d = (m.f || (m.f = [
+        "assets/missing-chunk.js", "assets/missing-style.css"
+      ]))) => i.map(i => d[i]);
+    `);
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /"assets\/missing-chunk\.js" in assets\/app\.js/);
+        assert.match(error.message, /"assets\/missing-style\.css" in assets\/app\.js/);
+        return true;
+      },
+    );
+  });
+
+  it("keeps ordinary asset references separate from Vite dependency-table URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assets = join(outputDirectory, "assets");
+    mkdirSync(assets, { recursive: true });
+    writeFileSync(join(assets, "shared.js"), "");
+    writeFileSync(join(assets, "app.js"), `
+      const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/shared.js"])))=>i.map(i=>d[i]);
+      const ordinaryAsset = "assets/shared.js";
+      import("./Node.js/missing.wasm");
+      const image = document.createElement("img");
+      image.src = "./Image";
+    `);
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /"assets\/shared\.js" in assets\/app\.js/);
+        assert.match(error.message, /"\.\/Node\.js\/missing\.wasm" in assets\/app\.js/);
+        assert.match(error.message, /"\.\/Image" in assets\/app\.js/);
+        return true;
+      },
+    );
+  });
+
   it("accepts prefixed HTML asset URLs when their files exist in the build output", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script><link href="/preview/favicon.svg">',

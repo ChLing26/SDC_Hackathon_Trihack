@@ -23,7 +23,7 @@ const apps = [
 
 const assetExtensions =
   "m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot";
-const assetURLCapturePattern = String.raw`((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)`;
+const assetURLCapturePattern = String.raw`((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)(?=$|["'\x60\s()<>;,])`;
 const quotedAssetReferencePattern = new RegExp(
   String.raw`["'\x60]${assetURLCapturePattern}["'\x60]`,
   "gi",
@@ -184,18 +184,27 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
       }
 
       for (const reference of javaScriptStringReferences.references) {
+        const referenceKey = reference.fromBuildRoot
+          ? `build-root:${reference.url}`
+          : reference.url;
         if (
           embeddedDocuments.some(
             (document) =>
               reference.index >= document.start &&
               reference.index < document.end,
           ) ||
-          seenUrls.has(reference.url)
+          seenUrls.has(referenceKey)
         ) {
           continue;
         }
-        seenUrls.add(reference.url);
-        references.push({ url: reference.url, source });
+        seenUrls.add(referenceKey);
+        references.push({
+          url: reference.url,
+          source,
+          ...(reference.fromBuildRoot
+            ? { resolveFrom: new URL(basePath, "http://preview.local").href }
+            : {}),
+        });
       }
 
       if (!isStylesheet) {
@@ -266,6 +275,15 @@ function collectJavaScriptStringAssetReferences(source) {
   const stringPattern =
     /(["'\x60])((?:\\[\s\S]|(?!\1)[^\\])*)\1/g;
   const staticStringBindings = collectStaticJavaScriptStringBindings(source);
+  // Vite's preload helper stores build-root-relative URLs in its dependency
+  // table, unlike normal imports which resolve relative to the emitting chunk.
+  // Mask literals so brackets or helper-like text inside strings cannot match.
+  const dependencyTables = [...maskJavaScriptLiterals(source).matchAll(
+    /\b__vite__mapDeps\s*=\s*\([^;]*?\b[$\w]+\.f\s*=\s*(\[[^\]]*\])/g,
+  )].map((match) => {
+    const start = match.index + match[0].lastIndexOf("[");
+    return { start, end: start + match[1].length };
+  });
 
   for (const literal of source.matchAll(stringPattern)) {
     // An interpolated template can contain runtime values, so keep its
@@ -281,7 +299,13 @@ function collectJavaScriptStringAssetReferences(source) {
     for (const match of decodedValue.matchAll(
       new RegExp(assetURLCapturePattern, "gi"),
     )) {
-      references.push({ url: match[1], index: literal.index });
+      references.push({
+        url: match[1],
+        index: literal.index,
+        fromBuildRoot: dependencyTables.some(
+          ({ start, end }) => literal.index >= start && literal.index < end,
+        ),
+      });
     }
 
     if (
@@ -772,7 +796,7 @@ function isExtensionlessMediaURL(url) {
 
 function isMediaDirectoryURL(url) {
   try {
-    return /(?:^|\/)(?:media|images?|img|audio|video|icons?)(?:\/|$)/i.test(
+    return /(?:^|\/)(?:media|images?|img|audio|video|icons?)\//i.test(
       new URL(url, "http://preview.local/").pathname,
     );
   } catch {
