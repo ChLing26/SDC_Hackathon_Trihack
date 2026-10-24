@@ -1199,6 +1199,59 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("resolves percent-encoded image and font filenames in CSS", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./hero%20photo%20%28wide%29.webp")} @font-face{src:url("./caf%C3%A9.woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "hero photo (wide).webp"), "");
+    writeFileSync(join(assetsDirectory, "café.woff2"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing percent-encoded CSS image and font URLs with their stylesheet", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      '.hero{background-image:url("./missing%20hero%20%28wide%29.webp")} @font-face{src:url("./missing-caf%C3%A9.woff2")}',
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /Canvas build output is missing files referenced by URLs/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/missing%20hero%20%28wide%29\.webp" in assets\/styles\.css/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/missing-caf%C3%A9\.woff2" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports the app and authored escaped URL when a CSS-escaped asset is missing", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",
