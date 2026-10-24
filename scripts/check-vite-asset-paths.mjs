@@ -23,8 +23,9 @@ const apps = [
 
 const assetExtensions =
   "m?js|css|wasm|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot";
+const assetURLCapturePattern = String.raw`((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)`;
 const quotedAssetReferencePattern = new RegExp(
-  String.raw`["'\x60]((?:[a-z][a-z\d+.-]*:)?(?://)?(?:/|\.\.?/)?[^"'\x60\s()<>;,]+?\.(?:${assetExtensions})(?:[?#][^"'\x60\s()<>;,]*)?)["'\x60]`,
+  String.raw`["'\x60]${assetURLCapturePattern}["'\x60]`,
   "gi",
 );
 const quotedLocalURLPattern =
@@ -114,6 +115,9 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
       const embeddedDocuments = isStylesheet
         ? []
         : collectStaticJavaScriptSrcdoc(content, source);
+      const javaScriptStringReferences = isStylesheet
+        ? { references: [], ranges: [] }
+        : collectJavaScriptStringAssetReferences(content);
 
       if (isStylesheet) {
         for (const match of content.matchAll(cssUrlReferencePattern)) {
@@ -126,6 +130,13 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
 
       for (const match of content.matchAll(quotedAssetReferencePattern)) {
         if (
+          javaScriptStringReferences.ranges.some(
+            ({ start, end }) => match.index >= start && match.index < end,
+          )
+        ) {
+          continue;
+        }
+        if (
           embeddedDocuments.some(
             (document) =>
               match.index >= document.start && match.index < document.end,
@@ -136,6 +147,21 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
         if (seenUrls.has(match[1])) continue;
         seenUrls.add(match[1]);
         references.push({ url: match[1], source });
+      }
+
+      for (const reference of javaScriptStringReferences.references) {
+        if (
+          embeddedDocuments.some(
+            (document) =>
+              reference.index >= document.start &&
+              reference.index < document.end,
+          ) ||
+          seenUrls.has(reference.url)
+        ) {
+          continue;
+        }
+        seenUrls.add(reference.url);
+        references.push({ url: reference.url, source });
       }
 
       if (!isStylesheet) {
@@ -184,6 +210,33 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
   }
 
   return references;
+}
+
+function collectJavaScriptStringAssetReferences(source) {
+  const references = [];
+  const ranges = [];
+  const stringPattern =
+    /(["'\x60])((?:\\[\s\S]|(?!\1)[^\\])*)\1/g;
+
+  for (const literal of source.matchAll(stringPattern)) {
+    // An interpolated template can contain runtime values, so keep its
+    // existing raw-text handling rather than treating it as a static URL.
+    if (literal[1] === "`" && literal[2].includes("${")) continue;
+
+    ranges.push({
+      start: literal.index,
+      end: literal.index + literal[0].length,
+    });
+
+    const decodedValue = decodeJavaScriptString(literal[2]);
+    for (const match of decodedValue.matchAll(
+      new RegExp(assetURLCapturePattern, "gi"),
+    )) {
+      references.push({ url: match[1], index: literal.index });
+    }
+  }
+
+  return { references, ranges };
 }
 
 function collectBuiltSVGReferences(outputDirectory) {

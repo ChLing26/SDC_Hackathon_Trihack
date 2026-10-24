@@ -888,6 +888,54 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("decodes escaped JavaScript asset URLs before checking emitted files", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      String.raw`const image = "\x2fpreview\x2fassets\x2fmissing\u002ewebp";
+      const icon = "\u{2f}preview\u{2f}assets\u{2f}missing-icon\u{2e}svg";`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing\.webp" in assets\/app\.js/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-icon\.svg" in assets\/app\.js/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("checks existing escaped JavaScript assets while ignoring routes and external URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      String.raw`const image = "\x2fpreview\u002fassets\x2fpresent\u002ewebp";
+      const route = "\x2fpreview\x2fproducts\x2fitem";
+      const external = "https:\x2f\x2fcdn.example.test/missing.webp";
+      const embedded = "data:image/png;base64,AAAA";`,
+    );
+    writeFileSync(join(assetsDirectory, "present.webp"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("does not let comment-like slashes in regular expressions hide later assets", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script>',
