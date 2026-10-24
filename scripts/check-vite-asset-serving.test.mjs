@@ -88,14 +88,7 @@ function runVite(args, cwd) {
 function startVitePreview(fixtureRoot, port) {
   const child = spawn(
     viteCli,
-    [
-      "preview",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(port),
-      "--strictPort",
-    ],
+    ["preview", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     {
       cwd: fixtureRoot,
       detached: true,
@@ -401,7 +394,7 @@ new URL(\`https://cdn.example/\${variant}.wasm\`, import.meta.url);`,
   it("fails when a referenced WebAssembly file returns an HTTP error", async () => {
     const app = makeBuiltApp();
     writeFileSync(
-      join(tempRoot, "dist", "assets", "app.js"),
+      join(tempRoot, "dist", "assets", "features", "lazy-feature.js"),
       `new URL("./missing.wasm", import.meta.url);`,
     );
     const fetchImpl = async (input) => {
@@ -425,14 +418,14 @@ new URL(\`https://cdn.example/\${variant}.wasm\`, import.meta.url);`,
         fetchImpl,
         log: () => {},
       }),
-      /Canvas WebAssembly request .* returned HTTP 404/,
+      /Canvas WebAssembly request .* from emitted bundle "assets\/features\/lazy-feature\.js" returned HTTP 404/,
     );
   });
 
   it("rejects a successful WebAssembly request with the wrong response type", async () => {
     const app = makeBuiltApp();
     writeFileSync(
-      join(tempRoot, "dist", "assets", "app.js"),
+      join(tempRoot, "dist", "assets", "features", "lazy-feature.js"),
       `new URL("./feature.wasm", import.meta.url);`,
     );
     const fetchImpl = async (input) => {
@@ -456,7 +449,38 @@ new URL(\`https://cdn.example/\${variant}.wasm\`, import.meta.url);`,
         fetchImpl,
         log: () => {},
       }),
-      /Canvas WebAssembly request .* returned content type "application\/octet-stream" instead of application\/wasm/,
+      /Canvas WebAssembly request .* from emitted bundle "assets\/features\/lazy-feature\.js" returned content type "application\/octet-stream" instead of application\/wasm/,
+    );
+  });
+
+  it("includes the emitted bundle when a WebAssembly request fails on the network", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "lazy-feature.js"),
+      `new URL("./feature.wasm", import.meta.url);`,
+    );
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".wasm")) {
+        throw new Error("connection reset");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas WebAssembly request .* from emitted bundle "assets\/features\/lazy-feature\.js" failed: connection reset/,
     );
   });
 
