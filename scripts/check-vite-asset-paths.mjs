@@ -221,26 +221,35 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
 
         const resolveFrom = new URL(basePath, "http://preview.local").href;
         for (const document of embeddedDocuments) {
-          references.push(
+          const documentBaseURL = resolveEffectiveBaseURL(
+            document.html,
+            new URL(resolveFrom),
+          );
+          const documentReferences = [
             ...collectHTMLReferences(
               document.html,
               document.source,
-              resolveFrom,
+              documentBaseURL.href,
             ),
             ...collectInlineStyleReferences(
               document.html,
               document.source,
-              resolveFrom,
+              documentBaseURL.href,
             ),
             ...collectInlineSVGReferences(
               document.html,
               document.source,
-              resolveFrom,
+              documentBaseURL.href,
             ),
             ...collectIframeSrcdocReferences(
               document.html,
               document.source,
-              resolveFrom,
+              documentBaseURL.href,
+            ),
+          ];
+          references.push(
+            ...documentReferences.filter((reference) =>
+              isPreviewOriginReference(reference, documentBaseURL),
             ),
           );
         }
@@ -796,6 +805,7 @@ function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
       const attribute = match[1].toLowerCase();
       const rawValue = match[2] ?? match[3] ?? match[4];
       if (rawValue === undefined) continue;
+      if (element === "base" && attribute === "href") continue;
       if (!/^(?:src|href|srcset|imagesrcset|poster|data)$/i.test(attribute)) {
         continue;
       }
@@ -891,25 +901,74 @@ function collectIframeSrcdocReferences(
     if (!srcdocMatch) continue;
 
     const embeddedHtml = decodeHtmlCharacterReferences(srcdocMatch[2]).value;
+    const embeddedBaseURL = resolveEffectiveBaseURL(
+      embeddedHtml,
+      resolveFrom
+        ? new URL(resolveFrom)
+        : new URL("/preview/", "http://preview.local"),
+    );
     const iframeSource =
       `${documentSource}:${lineNumberAt(html, tagStart)} iframe[srcdoc]`;
-    references.push(
-      ...collectHTMLReferences(embeddedHtml, iframeSource, resolveFrom),
-      ...collectInlineStyleReferences(embeddedHtml, iframeSource, resolveFrom),
+    const embeddedReferences = [
+      ...collectHTMLReferences(
+        embeddedHtml,
+        iframeSource,
+        embeddedBaseURL.href,
+      ),
+      ...collectInlineStyleReferences(
+        embeddedHtml,
+        iframeSource,
+        embeddedBaseURL.href,
+      ),
       ...collectInlineSVGReferences(
         embeddedHtml,
         iframeSource,
-        resolveFrom,
+        embeddedBaseURL.href,
       ),
       ...collectIframeSrcdocReferences(
         embeddedHtml,
         iframeSource,
-        resolveFrom,
+        embeddedBaseURL.href,
+      ),
+    ];
+    references.push(
+      ...embeddedReferences.filter((reference) =>
+        isPreviewOriginReference(reference, embeddedBaseURL),
       ),
     );
   }
 
   return references;
+}
+
+function resolveEffectiveBaseURL(html, documentURL) {
+  for (const match of html.matchAll(/<base\b([^>]*)>/gi)) {
+    const hrefMatch = match[1].match(
+      /(?:^|\s)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/i,
+    );
+    if (!hrefMatch) continue;
+
+    const href = decodeHtmlCharacterReferences(
+      hrefMatch[1] ?? hrefMatch[2] ?? hrefMatch[3] ?? "",
+    ).value.trim();
+    try {
+      return new URL(href, documentURL);
+    } catch {
+      return documentURL;
+    }
+  }
+  return documentURL;
+}
+
+function isPreviewOriginReference(reference, baseURL) {
+  try {
+    return (
+      new URL(reference.resolvedUrl ?? reference.url, baseURL).origin ===
+      "http://preview.local"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function collectStaticJavaScriptSrcdoc(source, codeSource) {
@@ -1109,27 +1168,36 @@ function collectIframePageReferences(
 
   while (pendingDocuments.length > 0) {
     const document = pendingDocuments.pop();
+    const documentBaseURL = resolveEffectiveBaseURL(
+      document.html,
+      document.url,
+    );
     if (document.includeReferences) {
-      references.push(
+      const documentReferences = [
         ...collectHTMLReferences(
           document.html,
           document.source,
-          document.url.href,
+          documentBaseURL.href,
         ),
         ...collectInlineStyleReferences(
           document.html,
           document.source,
-          document.url.href,
+          documentBaseURL.href,
         ),
         ...collectInlineSVGReferences(
           document.html,
           document.source,
-          document.url.href,
+          documentBaseURL.href,
         ),
         ...collectIframeSrcdocReferences(
           document.html,
           document.source,
-          document.url.href,
+          documentBaseURL.href,
+        ),
+      ];
+      references.push(
+        ...documentReferences.filter((reference) =>
+          isPreviewOriginReference(reference, documentBaseURL),
         ),
       );
     }
@@ -1164,7 +1232,7 @@ function collectIframePageReferences(
 
       let pageURL;
       try {
-        pageURL = new URL(url, document.url);
+        pageURL = new URL(url, documentBaseURL);
       } catch {
         continue;
       }
@@ -1175,7 +1243,7 @@ function collectIframePageReferences(
 
       const source =
         `${document.source}:${lineNumberAt(document.html, tagStart)} iframe[src]`;
-      const reference = { url, source, resolveFrom: document.url.href };
+      const reference = { url, source, resolveFrom: documentBaseURL.href };
       references.push(reference);
 
       if (!pageURL.pathname.startsWith(basePath)) continue;
@@ -1862,7 +1930,14 @@ export function checkAssetPaths(app, {
     ...collectHTMLReferences(html),
     ...collectInlineStyleReferences(html),
     ...collectInlineSVGReferences(html),
-    ...collectIframeSrcdocReferences(html),
+    ...collectIframeSrcdocReferences(
+      html,
+      "index.html",
+      resolveEffectiveBaseURL(
+        html,
+        new URL(basePath, "http://preview.local"),
+      ).href,
+    ),
     ...collectIframePageReferences(html, {
       outputDirectory,
       basePath,

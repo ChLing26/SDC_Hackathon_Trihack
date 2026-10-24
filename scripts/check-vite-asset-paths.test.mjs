@@ -639,6 +639,31 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("resolves iframe srcdoc resources using its effective inherited and declared base URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<base href="/preview/frames/shared/">
+<script src="/preview/assets/app.js"></script>
+<iframe srcdoc="&lt;img src=&quot;frame.webp&quot;&gt;"></iframe>
+<iframe srcdoc="&lt;base href=&quot;/preview/frames/declared/&quot;&gt;&lt;img src=&quot;declared.webp&quot;&gt;"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "frames", "shared"), { recursive: true });
+    mkdirSync(join(outputDirectory, "frames", "declared"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(
+      join(outputDirectory, "frames", "shared", "frame.webp"),
+      "",
+    );
+    writeFileSync(
+      join(outputDirectory, "frames", "declared", "declared.webp"),
+      "",
+    );
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("reports incorrect iframe srcdoc prefixes with their location and URL", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
@@ -773,6 +798,89 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       }),
     );
     assert.match(messages[0], /exist in the build output/);
+  });
+
+  it("resolves iframe resources and nested iframe URLs against the same-origin base URL", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/embedded.html"></iframe>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    const framesDirectory = join(outputDirectory, "frames");
+    const sharedDirectory = join(framesDirectory, "shared");
+    mkdirSync(assetsDirectory, { recursive: true });
+    mkdirSync(sharedDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(framesDirectory, "embedded.html"),
+      `<base href="/preview/frames/shared/">
+<img src="frame.webp">
+<div style="background:url('frame.svg')"></div>
+<iframe src="nested.html"></iframe>`,
+    );
+    writeFileSync(
+      join(sharedDirectory, "nested.html"),
+      `<img src="nested.webp">`,
+    );
+    for (const file of ["frame.webp", "frame.svg", "nested.webp"]) {
+      writeFileSync(join(sharedDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("keeps missing iframe diagnostics tied to the authored URL and HTML page when a base URL applies", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/embedded.html"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "frames"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(
+      join(outputDirectory, "frames", "embedded.html"),
+      `<base href="/preview/shared/">
+<img src="missing.webp">
+<iframe src="missing.html"></iframe>`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"missing\.webp" in iframe page frames\/embedded\.html:2 img\[src\]/,
+        );
+        assert.match(
+          error.message,
+          /"missing\.html" in iframe page frames\/embedded\.html:3 iframe\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("does not treat resources resolved to an external iframe base URL as local build assets", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/external.html"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "frames"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(
+      join(outputDirectory, "frames", "external.html"),
+      `<base href="https://cdn.example.test/pages/">
+<img src="remote.webp">
+<iframe src="nested.html"></iframe>
+<img src="/preview/assets/also-external.webp">`,
+    );
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
   });
 
   it("reports missing resources in iframe pages with the iframe page and offending URL", () => {
