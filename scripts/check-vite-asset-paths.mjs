@@ -663,15 +663,20 @@ function collectSVGReferences(svg, source) {
     /^(?:image|feimage|use|script|link|font-face-uri|mpath|textpath|tref|lineargradient|radialgradient|pattern|filter|mask|marker|clippath|symbol|view)$/i;
   const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const hrefPattern =
-    /(?:^|\s)(?:xlink:)?(?:href|src)\s*=\s*(["'])([\s\S]*?)\1/gi;
+    /(?:^|\s)((?:xlink:)?(?:href|src))\s*=\s*(["'])([\s\S]*?)\2/gi;
 
   for (const tagMatch of svg.matchAll(tagPattern)) {
     if (!resourceElements.test(tagMatch[1])) continue;
     for (const match of tagMatch[2].matchAll(hrefPattern)) {
-      const url = match[2].trim();
+      const attribute = match[1].toLowerCase();
+      const url = match[3].trim();
       const resolvedUrl = decodeHtmlCharacterReferences(url).value;
       if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
-      references.push({ url, resolvedUrl, source });
+      references.push({
+        url,
+        resolvedUrl,
+        source: `${source} ${tagMatch[1].toLowerCase()}[${attribute}]`,
+      });
     }
   }
 

@@ -1617,6 +1617,7 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       join(assetsDirectory, "illustration.svg"),
       `<svg xmlns="http://www.w3.org/2000/svg">
         <image href="./images/missing-image.webp"/>
+        <image xlink:href="./images/missing-xlink-image.webp"/>
         <link rel="stylesheet" href="./styles/missing.css"/>
         <style>@font-face { src: url("./fonts/missing.woff2"); }</style>
       </svg>`,
@@ -1626,8 +1627,18 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
       (error) => {
         assert.match(error.message, /Canvas build output is missing files/);
-        assert.match(error.message, /"\.\/images\/missing-image\.webp" in assets\/illustration\.svg/);
-        assert.match(error.message, /"\.\/styles\/missing\.css" in assets\/illustration\.svg/);
+        assert.match(
+          error.message,
+          /"\.\/images\/missing-image\.webp" in assets\/illustration\.svg image\[href\]/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/images\/missing-xlink-image\.webp" in assets\/illustration\.svg image\[xlink:href\]/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/styles\/missing\.css" in assets\/illustration\.svg link\[href\]/,
+        );
         assert.match(error.message, /"\.\/fonts\/missing\.woff2" in assets\/illustration\.svg/);
         return true;
       },
