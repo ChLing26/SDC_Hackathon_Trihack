@@ -757,12 +757,22 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     const assetsDirectory = join(outputDirectory, "assets");
     const externalAsset = join(tempRoot, "external-app.js");
     mkdirSync(assetsDirectory, { recursive: true });
-    writeFileSync(externalAsset, "");
+    writeFileSync(
+      externalAsset,
+      'const hidden = "/preview/assets/missing-external-chunk.webp";',
+    );
     symlinkSync(externalAsset, join(assetsDirectory, "app.js"));
 
     assert.throws(
       () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
-      /build output is missing file referenced by URL: "\/preview\/assets\/app\.js"/,
+      (error) => {
+        assert.match(
+          error.message,
+          /build output is missing file referenced by URL: "\/preview\/assets\/app\.js"/,
+        );
+        assert.doesNotMatch(error.message, /missing-external-chunk/);
+        return true;
+      },
     );
   });
 
@@ -1518,6 +1528,55 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
         (error) => {
           assert.match(error.message, /configured base path "\/preview\/"/);
           assert.match(error.message, expectedSource);
+          return true;
+        },
+      );
+    }
+  });
+
+  it("scans JavaScript and CSS symlinks that resolve inside the build output", () => {
+    for (const { file, target, content } of [
+      {
+        file: "linked.js",
+        target: "javascript.bundle",
+        content: 'const image = "/preview/assets/missing-from-linked-js.webp";',
+      },
+      {
+        file: "linked.css",
+        target: "styles.bundle",
+        content:
+          '.hero { background-image: url("/preview/assets/missing-from-linked-css.svg"); }',
+      },
+    ]) {
+      const { app, outputDirectory } = createApp({
+        name: `SymlinkInside-${file}`,
+        html:
+          '<script src="/preview/assets/app.js"></script>' +
+          (file.endsWith(".css")
+            ? '<link rel="stylesheet" href="/preview/assets/linked.css">'
+            : '<script src="/preview/assets/linked.js"></script>'),
+      });
+      const assetsDirectory = join(outputDirectory, "assets");
+      const chunksDirectory = join(outputDirectory, "chunks");
+      mkdirSync(assetsDirectory, { recursive: true });
+      mkdirSync(chunksDirectory, { recursive: true });
+      writeFileSync(join(assetsDirectory, "app.js"), "");
+      const targetPath = join(chunksDirectory, target);
+      writeFileSync(targetPath, content);
+      symlinkSync(
+        targetPath,
+        join(assetsDirectory, file),
+      );
+
+      assert.throws(
+        () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+        (error) => {
+          const missingAsset =
+            file === "linked.js"
+              ? "missing-from-linked-js.webp"
+              : "missing-from-linked-css.svg";
+          assert.match(error.message, new RegExp(missingAsset));
+          assert.match(error.message, new RegExp(`assets/${file}`));
           return true;
         },
       );

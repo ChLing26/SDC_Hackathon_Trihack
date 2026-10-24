@@ -93,6 +93,7 @@ function readManifestPaths(manifestPath, cwd = process.cwd()) {
 function collectBuiltCodeReferences(outputDirectory, basePath) {
   const references = [];
   const pendingDirectories = [outputDirectory];
+  const realOutputDirectory = realpathSync(outputDirectory);
 
   while (pendingDirectories.length > 0) {
     const directory = pendingDirectories.pop();
@@ -103,7 +104,27 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
         continue;
       }
 
-      if (!entry.isFile() || !/\.(?:m?js|css)$/i.test(entry.name)) continue;
+      if (!/\.(?:m?js|css)$/i.test(entry.name)) continue;
+      if (!entry.isFile()) {
+        if (!entry.isSymbolicLink()) continue;
+
+        try {
+          const realEntryPath = realpathSync(entryPath);
+          const relativeEntryPath = relative(
+            realOutputDirectory,
+            realEntryPath,
+          );
+          if (
+            relativeEntryPath === ".." ||
+            relativeEntryPath.startsWith(`..${sep}`) ||
+            !statSync(realEntryPath).isFile()
+          ) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
 
       const source = relative(outputDirectory, entryPath).split(sep).join("/");
       const rawContent = readFileSync(entryPath, "utf8");
