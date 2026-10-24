@@ -1180,6 +1180,27 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("resolves image and font filenames continued across CSS lines", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    const lineFeedContinuation = "\\\n";
+    const carriageReturnContinuation = "\\\r\n";
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `.hero{background-image:url("./hero-${lineFeedContinuation}photo.webp")} @font-face{src:url(./font-${carriageReturnContinuation}regular.woff2)}`,
+    );
+    writeFileSync(join(assetsDirectory, "hero-photo.webp"), "");
+    writeFileSync(join(assetsDirectory, "font-regular.woff2"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("resolves escaped punctuation and non-ASCII filenames in CSS", () => {
     const { app, outputDirectory } = createApp({
       html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
@@ -1276,6 +1297,42 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
         assert.match(
           error.message,
           /"\.\/missing\\20 image\.webp" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports missing CSS assets with continued URLs exactly as authored", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    const lineFeedContinuation = "\\\n";
+    const carriageReturnContinuation = "\\\r\n";
+    const missingImageURL = `./missing-${lineFeedContinuation}photo.webp`;
+    const missingFontURL = `./missing-${carriageReturnContinuation}regular.woff2`;
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `.hero{background-image:url("${missingImageURL}")} @font-face{src:url("${missingFontURL}")}`,
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /Canvas build output is missing files referenced by URLs/,
+        );
+        assert.ok(
+          error.message.includes(`"${missingImageURL}" in assets/styles.css`),
+        );
+        assert.ok(
+          error.message.includes(`"${missingFontURL}" in assets/styles.css`),
         );
         return true;
       },
