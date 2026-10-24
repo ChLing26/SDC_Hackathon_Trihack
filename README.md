@@ -1,14 +1,9 @@
-> [!IMPORTANT]
-> ## 📁 Submission Documents & Templates
-> **All required submission templates are in the Google Drive folder below. Download them before you start.**
->
-> ### 👉 [**OPEN THE GOOGLE DRIVE FOLDER**](https://drive.google.com/drive/folders/1xw7c2aN8N-at8hPEULzkcU76e_FFb0Ef) 👈
-
+<img width="1515" height="552" alt="WhatsApp Image 2026-10-25 at 12 17 28 AM" src="https://github.com/user-attachments/assets/77fe47d9-b97e-4b97-ade8-18970d78b93b" />
 ---
 
-# Project Name
+# SmartSME Procurement
 
-> A one-sentence description of what your project does and who it is for.
+-> An AI powered procurement platform that helps SMEs identify the best suppliers, optimize purchasing decisions, detect unusual costs, and streamline order management.
 
 ---
 
@@ -16,20 +11,19 @@
 
 | Field                  | Details                                     |
 | ---------------------- | ------------------------------------------- |
-| **Team Name**          | Your Team Name                              |
-| **Team Domain**        | Domain 1 / Domain 2 *(choose one)*          |
-| **SDG Track (1–17)**   | e.g. SDG 11 — Sustainable Cities and Communities |
-| **Team Leader**        | Leader Name                                 |
-| **University**         | University Name(s)                          |
-| **Number of Members**  | e.g. 4                                      |
+| **Team Name**          | TriHack                                     |
+| **Team Domain**        | Domain 2                                    |
+| **SDG Track (1–17)**   | SDG 8-DECENT WORK AND ECONOMIC GROWTH, SDG 9-Industry&Innovation&Infastructure, SDG 17-Patnership for the goals|
+| **Team Leader**        | Ng Xin Rou                                  |
+| **University**         | Xiamen University Malaysia                  |
+| **Number of Members**  | 5                                           |
 
 ## Links
 
 | Resource          | Link                                           |
-| ----------------- | ---------------------------------------------- |
-| GitHub Repository | https://github.com/your-username/your-project  |
-| Live Demo         | https://your-project.replit.app                |
-| RunPod Endpoint   | https://api.runpod.ai/v2/your-endpoint-id      |
+| ----------------- | ----------------------------------------------------------- |
+| GitHub Repository | https://github.com/ChLing26/SDC_Hackathon_Trihack/tree/main |
+| Live Demo         | https://tri-hack-sdc-hackaton.replit.app                    |
 | Slide Deck        | https://example.com/slides                     |
 | Demo Video        | https://example.com/demo-video                 |
 
@@ -39,26 +33,27 @@
 
 ### Problem
 
-Describe the real-world problem you are solving in 2–4 sentences. Who is affected, and why does it matter?
+SMEs often face difficulties identifying reliable suppliers and comparing prices, shipping fees, delivery times, and supplier locations. Manual procurement processes can be time-consuming and may lead to higher purchasing costs, inefficient supplier selection, and limited visibility into unusual charges. These challenges make it harder for SMEs to make cost-effective and informed purchasing decisions.
 
 ### Solution
 
-Explain how your project uses AI to solve the problem and what makes it valuable.
+SmartSME Procurement is an AI powered procurement platform designed to help SMEs make smarter and more efficient purchasing decisions. It evaluates suppliers based on key factors such as price, shipping fees, delivery time, and distance to generate supplier recommendations. The platform also provides AI powered purchasing advice, flags potentially unusual delivery fees, and supports order management and PDF e-invoice generation to streamline the procurement process.
 
 ### Key Features
 
-- **Feature 1** — Short description.
-- **Feature 2** — Short description.
-- **Feature 3** — Short description.
+- **AI-Powered Supplier Recommendation** — Evaluates suppliers based on price, shipping fees, delivery time, and distance to help SMEs identify suitable suppliers.
+- **Supplier Scoring and Comparison** — Calculates and compares supplier scores to support transparent, data-driven purchasing decisions.
+- **AI Smart Advice** — Uses the Gemini API to provide purchasing insights and recommendations based on available procurement data.
+- **Order Management and E-Invoice Generation** — Supports order approval workflows and generates PDF e-invoices from finalized order data.
 
 ### Tech Stack
 
 | Layer         | Technology                   |
 | ------------- | ---------------------------- |
-| Frontend      | e.g. HTML, React             |
-| Backend       | e.g. Python, Flask / FastAPI |
-| Database      | e.g. PostgreSQL, SQLite      |
-| AI / Compute  | RunPod (GPU)                 |
+| Frontend      | React, TypeScript            |
+| Backend       | Python, FastAPI              |
+| Database      | SQLITE                       |
+| AI / Compute  | Google Gemini API            |
 | Hosting / Dev | Replit                       |
 
 ---
@@ -66,36 +61,29 @@ Explain how your project uses AI to solve the problem and what makes it valuable
 ## Project Structure
 
 ```
-.
-├── docs/                    # Screenshots, diagrams
-├── runpod/
-│   └── handler.py           # RunPod serverless handler (GPU workload)
-├── src/
-│   ├── main.py              # Application entry point
-│   └── utils.py             # Helper functions
-├── submission/              # Required submission documents
-│   ├── SDC2026_TeamName_Preliminary.pdf      # Preliminary submission
-│   ├── SDC2026_TeamName_TechDeclaration.pdf  # Technology declaration
-│   ├── SDC2026_TeamName_Replit_POU.pdf       # Replit proof of use
-│   └── SDC2026_TeamName_Runpod_POU.pdf       # RunPod proof of use
-├── tests/
-│   └── test_utils.py        # Unit tests
-├── .env.example             # Example environment variables
-├── .gitignore
-├── .replit                  # Replit run configuration
-├── LICENSE
-├── requirements.txt         # Python dependencies
-└── README.md
+SmartSME-Procurement/
+├── docs/                   # Screenshots, diagrams, documentation
+├── src/                    # Application source code
+│   ├── main.py             # Application entry point
+│   ├── api/                # API routes and endpoints
+│   ├── services/           # Supplier recommendation, scoring, AI advice
+│   ├── database/           # Database connection and data operations
+│   └── models/             # Data models and schemas
+├── tests/                  # Automated tests
+├── .env.example            # Example environment variables
+├── .gitignore              # Files excluded from Git
+├── requirements.txt        # Python dependencies
+└── README.md               # Project documentation
 ```
 
 ### Architecture
 
 ```
-User ──► Replit (App / API) ──► RunPod Endpoint (GPU model)
-                │
-                └──► Response returned to user
-```
-
+User ──► Replit Fronted ──► Python Backend (FastAPI) ──► Procurement Results ──► User(SME)
+                                 │
+                                 └──► SQLITE
+                                 └──► GEMINI API
+                                 └──► Supplier Scoring
 ---
 
 ## How to Run
@@ -108,26 +96,56 @@ User ──► Replit (App / API) ──► RunPod Endpoint (GPU model)
    - `RUNPOD_ENDPOINT_ID`
 3. Click **Run**. Replit uses the `.replit` file to start `python src/main.py`.
 
+1. Open the [TriHack_SDC Hackaton]()
+2. Open the **Secrets** tab and add the required environment variables from `.env.example`, such as:
+   - `GEMINI_API_KEY`
+   - `PYTHON_BACKEND_TOKEN`
+   - `AI_INTEGRATIONS_OPENAI_BASE_URL`
+   - `AI_INTEGRATIONS_OPENAI_API_KEY`
+   - `SESSION_SECRET`
+3. Install the required dependencies if they are not installed automatically:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Click **Run**. Replit starts the application using the project's configured run command.
+
 ### Option 2 — Run Locally
 
+**Prerequisites**
+- Python 3.10 or later
+- Git
+- A Gemini API key 
+  
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/your-project.git
-cd your-project
+git clone https://github.com/ChLing26/SDC_Hackathon_Trihack.git
+cd SDC_Hackathon_Trihack
 
 # 2. Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+
+# Windows
+venv\Scripts\activate
+
+# macOS / Linux
+source venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
 
 # 4. Configure environment variables
-cp .env.example .env            # then fill in your values
+# Copy .env.example to .env, then fill in your values
+# Windows
+copy .env.example .env
 
-# 5. Run the app
-python src/main.py
-```
+# macOS / Linux
+cp .env.example .env
+
+# 5. Run the application
+# Use the actual entry point configured in your project
+python main.py
+```.
+
 
 ### Run Tests
 
@@ -137,68 +155,49 @@ python -m unittest discover tests
 
 ---
 
-## How We Use Replit *(Required)*
+## How We Use Replit 
 
-Describe how your team used Replit. For example:
+- **Development:** Our team uses Replit to develop and integrate the SmartSME Procurement application and its procurement-related features.
+- **Hosting:** Replit is used to run or deploy the application for demonstration, depending on the project's deployment configuration.
+- **Secrets:** API keys, including the Gemini API key, are configured through Replit Secrets and are not hardcoded in the source code.
 
-- **Development:** Collaborative coding in a shared Repl using Multiplayer.
-- **Hosting:** The app is deployed with Replit Deployments at the Live Demo link above.
-- **Secrets:** API keys are stored in Replit Secrets, never in the code.
+📄 Proof of use: [`submission/SDC2026_TriHack_Replit_POU.pdf`](file:///C:/xin%20rou/Documents/Competition/SDC%20Hackaton/proof%20of%20use/submission_SDC2026_TriHack_Replit_POU.pdf)
 
-📄 Proof of use: [`submission/SDC2026_TeamName_Replit_POU.pdf`](submission/SDC2026_TeamName_Replit_POU.pdf)
-
-## How We Use RunPod *(Required)*
-
-Describe how your team used RunPod. For example:
-
-- **Workload:** Model inference (e.g. text generation, image processing) runs on a RunPod GPU.
-- **Setup:** `runpod/handler.py` is deployed as a **RunPod Serverless Endpoint**.
-- **Integration:** The Replit app sends requests to the endpoint using `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`.
-
-Example request:
-
-```bash
-curl -X POST https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/runsync \
-  -H "Authorization: Bearer $RUNPOD_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"input": {"prompt": "Hello"}}'
-```
-
-📄 Proof of use: [`submission/SDC2026_TeamName_Runpod_POU.pdf`](submission/SDC2026_TeamName_Runpod_POU.pdf)
-
----
 
 ## Challenges & Learnings
 
 - What challenges did you face, and how did you overcome them?
+  Integrating the frontend, FastAPI backend, database, and Gemini API required careful coordination. The team also faced challenges with environment configuration, Git collaboration, and testing the application across different components.
 - What did your team learn?
-
+  The team learned how to develop and integrate APIs, manage database records, configure environment variables securely, collaborate through GitHub, and apply AI to support real-world SME procurement decisions.
+  
 ## Future Improvements
 
-- [ ] Improvement 1
-- [ ] Improvement 2
+- [ ] Improvement 1:Enhanced Supplier Intelligence: Integrate more supplier data and historical purchasing records to improve recommendation accuracy and supplier reliability assessment.
+- [ ] Improvement 2:Advanced Procurement Analytics: Add interactive dashboards, spending trend analysis, and more comprehensive anomaly detection to help SMEs make better purchasing decisions.
 
 ## Team
 
-| Name        | Role                | GitHub                                   |
-| ----------- | ------------------- | ---------------------------------------- |
-| Member Name | Team Lead / Backend | [@username](https://github.com/username) |
-| Member Name | Frontend            | [@username](https://github.com/username) |
-| Member Name | AI / RunPod         | [@username](https://github.com/username) |
+| Name        | Role                | GitHub                                          |
+| ----------- | ------------------- | ------------------------------------------------|
+| Ng Xin Rou  | Team Lead / Backend | 2006NXR(https://github.com/2006NXR)             |
+| Tan Xin Hui | Frontend /AI        | tanhuiling59(https://github.com/tanhuiling59)   |
+| Tan Hui Ling| Frontend            | xinhuitan0731（https://github.com/xinhuitan0731)|
+| Chong Ling  | Backend             | ChLing26(https://github.com/ChLing26)           |
+| Ong Yi Soong| AI / RunPod         | SlokeNg(https://github.com/SlokeOng)            |
 
 ---
 
 ## Submission Checklist
 
-- [ ] Team name, domain (Domain 1 / Domain 2) and SDG track filled in
+- [/] Team name, domain (Domain 1 / Domain 2) and SDG track filled in
 - [ ] Slide deck link added
 - [ ] Demo video link added
 - [ ] Replit used, with proof of use in `submission/`
-- [ ] RunPod used, with proof of use in `submission/`
 - [ ] Preliminary submission completed (`SDC2026_TeamName_Preliminary.pdf`)
 - [ ] Technology declaration completed (`SDC2026_TeamName_TechDeclaration.pdf`)
 - [ ] Submission files renamed with your team name (replace `TeamName`)
-- [ ] "How to Run" steps verified
+- [/] "How to Run" steps verified
 - [ ] No API keys or secrets committed to the repository
 
 ## License
