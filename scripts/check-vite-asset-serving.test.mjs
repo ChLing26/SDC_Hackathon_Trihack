@@ -841,6 +841,50 @@ new Worker(new URL(\`./workers/\${runtimeWorkerName}.js\`, import.meta.url));`,
     ]);
   });
 
+  it("rejects a secondary ordinary image response without a content type", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath),
+      `<script type="module" src="/__mockup/assets/app.js"></script>
+<link rel="stylesheet" href="/__mockup/assets/app.css">
+<link rel="icon" href="/__mockup/assets/icon.svg">
+<img src="/__mockup/assets/first.png">
+<img src="/__mockup/assets/later.png">`,
+    );
+    const imageRequests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".png")) {
+        imageRequests.push(url.pathname);
+        return url.pathname.endsWith("/first.png")
+          ? response("image", "image/png")
+          : new Response(null);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas media request .*later\.png returned content type "missing" instead of an expected media type/,
+    );
+
+    assert.deepEqual(imageRequests, [
+      "/__mockup/assets/first.png",
+      "/__mockup/assets/later.png",
+    ]);
+  });
+
   it("requests local srcset and imagesrcset candidates beneath the configured preview path", async () => {
     const app = makeBuiltApp();
     writeFileSync(
