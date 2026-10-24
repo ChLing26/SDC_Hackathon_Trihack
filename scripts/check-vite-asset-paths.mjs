@@ -701,16 +701,21 @@ function isSrcsetImageDirectoryURL(url) {
 
 function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
   const references = [];
-  const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
+  const tagPattern = /<([a-z][a-z\d:-]*)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi;
   const attributePattern =
-    /\b(src|href|srcset|imagesrcset|poster|data)\s*=\s*["']([^"']+)["']/gi;
+    /(?:^|\s)([^\s"'`=<>/]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/gi;
 
   for (const tagMatch of html.matchAll(tagPattern)) {
     const element = tagMatch[1].toLowerCase();
     const tagAttributes = tagMatch[2];
     for (const match of tagAttributes.matchAll(attributePattern)) {
       const attribute = match[1].toLowerCase();
-      const decodedValue = decodeHtmlCharacterReferences(match[2]).value;
+      const rawValue = match[2] ?? match[3];
+      if (rawValue === undefined) continue;
+      if (!/^(?:src|href|srcset|imagesrcset|poster|data)$/i.test(attribute)) {
+        continue;
+      }
+      const decodedValue = decodeHtmlCharacterReferences(rawValue).value;
       const urls =
         attribute === "srcset" || attribute === "imagesrcset"
           ? collectSrcsetURLs(decodedValue)

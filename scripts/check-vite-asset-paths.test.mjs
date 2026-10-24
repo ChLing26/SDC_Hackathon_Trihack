@@ -264,6 +264,27 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks resource attributes after > inside a quoted HTML attribute without treating its text as a tag", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<img alt="value > <img src='/preview/assets/attribute-text.webp'>" src="/preview/assets/missing-after-quoted-greater-than.webp">`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-after-quoted-greater-than\.webp"/,
+        );
+        assert.doesNotMatch(error.message, /attribute-text\.webp/);
+        return true;
+      },
+    );
+  });
+
   it("reports incorrect preview prefixes in unquoted HTML style attributes with their HTML line", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
