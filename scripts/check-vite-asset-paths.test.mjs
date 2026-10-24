@@ -1077,6 +1077,59 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("checks cache-busted CSS imports by their emitted file path and ignores external imports", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `@import "./theme.css?cache=123";
+      @import url("./layout.css#dark");
+      @import "https://cdn.example.test/external.css?cache=456";
+      @import url("https://cdn.example.test/external-url.css#theme");`,
+    );
+    writeFileSync(join(assetsDirectory, "theme.css"), "");
+    writeFileSync(join(assetsDirectory, "layout.css"), "");
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports the original cache-busted CSS import URL and source stylesheet when missing", () => {
+    const { app, outputDirectory } = createApp({
+      name: "Canvas",
+      basePath: "/__mockup/",
+      html: '<link rel="stylesheet" href="/__mockup/assets/styles.css"><script src="/__mockup/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "styles.css"),
+      `@import "./missing-theme.css?cache=123";
+      @import url("./missing-layout.css#dark");`,
+    );
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\.\/missing-theme\.css\?cache=123" in assets\/styles\.css/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/missing-layout\.css#dark" in assets\/styles\.css/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports missing CSS files imported with url() and their stylesheet source", () => {
     const { app, outputDirectory } = createApp({
       name: "Canvas",
