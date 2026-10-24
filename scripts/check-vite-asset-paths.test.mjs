@@ -749,7 +749,7 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
-  it("rejects a referenced asset symlink that resolves outside the build output", () => {
+  it("reports a referenced asset symlink that resolves outside the build output", () => {
     const { app, outputDirectory } = createApp({
       name: "SymlinkOutside",
       html: '<script src="/preview/assets/app.js"></script>',
@@ -768,9 +768,9 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       (error) => {
         assert.match(
           error.message,
-          /build output is missing file referenced by URL: "\/preview\/assets\/app\.js"/,
+          /SymlinkOutside build output references files outside its output directory: "\/preview\/assets\/app\.js"/,
         );
-        assert.doesNotMatch(error.message, /missing-external-chunk/);
+        assert.doesNotMatch(error.message, /build output is missing file|missing-external-chunk/);
         return true;
       },
     );

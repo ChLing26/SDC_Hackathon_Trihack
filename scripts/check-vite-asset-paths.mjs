@@ -1332,6 +1332,7 @@ export function checkAssetPaths(app, {
   }
 
   const missingReferences = [];
+  const outsideOutputReferences = [];
   for (const reference of references) {
     const { url, source } = reference;
     let assetPath;
@@ -1351,7 +1352,12 @@ export function checkAssetPaths(app, {
       relativePath.startsWith(`..${sep}`) ||
       resolve(outputDirectory, relativePath) !== assetPath;
 
-    if (escapesOutputDirectory || !existsSync(assetPath)) {
+    if (escapesOutputDirectory) {
+      outsideOutputReferences.push({ url, source });
+      continue;
+    }
+
+    if (!existsSync(assetPath)) {
       missingReferences.push({ url, source });
       continue;
     }
@@ -1368,17 +1374,26 @@ export function checkAssetPaths(app, {
         realRelativePath === ".." ||
         realRelativePath.startsWith(`..${sep}`)
       ) {
-        missingReferences.push({ url, source });
+        outsideOutputReferences.push({ url, source });
       }
     } catch {
       missingReferences.push({ url, source });
     }
   }
 
+  const assetErrors = [];
+  if (outsideOutputReferences.length > 0) {
+    assetErrors.push(
+      `${app.name} build output references files outside its output directory: ${outsideOutputReferences.map(formatReference).join(", ")}`,
+    );
+  }
   if (missingReferences.length > 0) {
-    throw new Error(
+    assetErrors.push(
       `${app.name} build output is missing file${missingReferences.length === 1 ? "" : "s"} referenced by URL${missingReferences.length === 1 ? "" : "s"}: ${missingReferences.map(formatReference).join(", ")}`,
     );
+  }
+  if (assetErrors.length > 0) {
+    throw new Error(assetErrors.join(" "));
   }
 
   log(`${app.name} assets use configured prefix "${assetPrefix}" and exist in the build output.`);
