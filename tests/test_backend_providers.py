@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import httpx
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 import ai_advisor
 from ai_advisor import AIConfigurationError, GeminiProviderError, get_smart_advice
@@ -140,9 +140,56 @@ class ProviderChecks(unittest.TestCase):
 
     def test_structured_unavailable_status_is_classified_as_503(self):
         failure = ai_advisor.classify_gemini_error(
-            SimpleNamespace(code=None, status="UNAVAILABLE"),
+            errors.ServerError(0, {"error": {"status": "UNAVAILABLE"}}),
         )
         self.assertEqual((failure.category, failure.http_status), ("provider", 503))
+        self.assertIsNone(failure.upstream_http_status)
+
+    def test_local_timeouts_use_types_not_exception_names(self):
+        misleading = type("TimeoutConfigurationError", (Exception,), {})
+        for error in (
+            httpx.ReadTimeout("private-detail"),
+            httpx.ConnectTimeout("private-detail"),
+            TimeoutError("private-detail"),
+        ):
+            with self.subTest(exception=type(error).__name__):
+                failure = ai_advisor.classify_gemini_error(error)
+                self.assertEqual((failure.category, failure.http_status), ("timeout", 504))
+                self.assertIsNone(failure.upstream_http_status)
+        for error in (
+            misleading("private-detail"),
+            httpx.ConnectError("private-detail"),
+            RuntimeError("private-detail"),
+        ):
+            with self.subTest(exception=type(error).__name__):
+                failure = ai_advisor.classify_gemini_error(error)
+                self.assertEqual((failure.category, failure.http_status), ("provider", 502))
+                self.assertIsNone(failure.upstream_http_status)
+
+    def test_upstream_http_status_is_preserved_separately_from_classification(self):
+        for status in (503, 504):
+            with self.subTest(status=status):
+                error = errors.ServerError(
+                    status,
+                    {"error": {"status": "UNAVAILABLE", "message": "private-detail"}},
+                    response=httpx.Response(status),
+                )
+                failure = ai_advisor.classify_gemini_error(error)
+                self.assertEqual((failure.category, failure.http_status), ("provider", status))
+                self.assertEqual(failure.upstream_http_status, status)
+                self.assertNotIn("private-detail", str(failure))
+        # The actual response takes precedence over disagreeing structured fields.
+        failure = ai_advisor.classify_gemini_error(errors.ServerError(
+            504, {"error": {"status": "DEADLINE_EXCEEDED"}},
+            response=httpx.Response(503),
+        ))
+        self.assertEqual((failure.category, failure.http_status), ("provider", 503))
+        self.assertEqual(failure.upstream_http_status, 503)
+        failure = ai_advisor.classify_gemini_error(errors.ServerError(
+            504, {"error": {"status": "DEADLINE_EXCEEDED"}},
+        ))
+        self.assertEqual((failure.category, failure.http_status), ("provider", 504))
+        self.assertIsNone(failure.upstream_http_status)
 
     def test_advice_api_survives_provider_failures_and_recovers(self):
         from fastapi.testclient import TestClient
@@ -159,9 +206,11 @@ class ProviderChecks(unittest.TestCase):
         }
         scenarios = (
             ("unavailable", 503, "provider"),
-            ("deadline", 504, "timeout"),
+            ("deadline", 504, "provider"),
             ("transport_timeout", 504, "timeout"),
+            ("connection", 502, "provider"),
             ("unexpected", 502, "provider"),
+            ("misleading_timeout_name", 502, "provider"),
         )
         for scenario, failure_status, category in scenarios:
             with self.subTest(scenario=scenario):
@@ -172,8 +221,12 @@ class ProviderChecks(unittest.TestCase):
                     if len(requests) == 1:
                         if scenario == "transport_timeout":
                             raise httpx.ReadTimeout(private_detail, request=request)
+                        if scenario == "connection":
+                            raise httpx.ConnectError(private_detail, request=request)
                         if scenario == "unexpected":
                             raise RuntimeError(private_detail)
+                        if scenario == "misleading_timeout_name":
+                            raise type("TimeoutConfigurationError", (Exception,), {})(private_detail)
                         return httpx.Response(
                             failure_status,
                             json={"error": {
@@ -222,6 +275,7 @@ class ProviderChecks(unittest.TestCase):
                         self.assertEqual(len(requests), 1)
                         self.assertNotIn(private_detail, response.text)
                         self.assertNotIn(token, response.text)
+                        self.assertIn("still available", result["ai_advice"])
                         supplier = result["suppliers"][0]
                         self.assertEqual(supplier["total_cost_rm"], 25)
                         self.assertTrue(supplier["within_budget"])
@@ -245,6 +299,9 @@ class ProviderChecks(unittest.TestCase):
                         self.assertEqual(recovered.status_code, 200)
                         self.assertEqual(recovered.json()["ai_status"], "success")
                         self.assertIsNone(recovered.json()["ai_failure"])
+                        self.assertEqual(
+                            recovered.json()["ai_advice"], "Fixture meets both requirements.",
+                        )
                         self.assertEqual(len(requests), 2)
                 finally:
                     sdk_client.close()

@@ -3,8 +3,9 @@ import re
 from math import isfinite
 from pathlib import Path
 from dotenv import load_dotenv
+import httpx
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from src.backend_numbers import MAX_MONEY, bounded_decimal, checked_total
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -55,7 +56,9 @@ SAFE_PROVIDER_HTTP_STATUSES = frozenset({
 class GeminiProviderError(RuntimeError):
     """A provider failure with bounded, non-sensitive diagnostic fields only."""
 
-    def __init__(self, category: str, http_status: int):
+    def __init__(
+        self, category: str, http_status: int, *, upstream_http_status: int | None = None,
+    ):
         if category not in GEMINI_FAILURE_CATEGORIES:
             category = "provider"
         if http_status not in SAFE_PROVIDER_HTTP_STATUSES:
@@ -63,27 +66,58 @@ class GeminiProviderError(RuntimeError):
         super().__init__("Gemini advice is temporarily unavailable.")
         self.category = category
         self.http_status = http_status
+        # Internal provenance only; never retain the SDK exception or response.
+        self.upstream_http_status = (
+            upstream_http_status
+            if type(upstream_http_status) is int
+            and upstream_http_status in SAFE_PROVIDER_HTTP_STATUSES
+            else None
+        )
 
 
 def classify_gemini_error(error: Exception) -> GeminiProviderError:
     """Classify SDK failures without reading messages or provider response bodies."""
-    code = getattr(error, "code", None)
-    provider_status = code if type(code) is int and code in SAFE_PROVIDER_HTTP_STATUSES else None
-    status_name = getattr(error, "status", None)
-    status_name = status_name.upper() if isinstance(status_name, str) else ""
-    exception_name = type(error).__name__.lower()
-
-    if "timeout" in exception_name or code in (408, 504) or status_name == "DEADLINE_EXCEEDED":
-        return GeminiProviderError("timeout", provider_status or 504)
-    if code == 503 or status_name == "UNAVAILABLE":
-        return GeminiProviderError("provider", provider_status or 503)
-    if code == 429 or status_name in {"RESOURCE_EXHAUSTED", "TOO_MANY_REQUESTS"}:
-        return GeminiProviderError("quota", provider_status or 429)
-    if code in (401, 403) or status_name in {"UNAUTHENTICATED", "PERMISSION_DENIED"}:
-        return GeminiProviderError("permission", provider_status or 403)
-    if code in (400, 404, 422) or status_name in {"NOT_FOUND", "INVALID_ARGUMENT"}:
-        return GeminiProviderError("model", provider_status or 404)
-    return GeminiProviderError("provider", provider_status or 502)
+    if isinstance(error, errors.APIError):
+        response_status = getattr(error.response, "status_code", None)
+        upstream_status = (
+            response_status if type(response_status) is int
+            and response_status in SAFE_PROVIDER_HTTP_STATUSES else None
+        )
+        code = upstream_status or error.code
+        provider_status = (
+            code if type(code) is int and code in SAFE_PROVIDER_HTTP_STATUSES else None
+        )
+        status_name = error.status.upper() if isinstance(error.status, str) else ""
+        category = "provider"
+        http_status = provider_status or 502
+        # HTTP deadlines are provider failures, not confirmed local timeouts.
+        # Prefer the actual HTTP status over conflicting structured status fields.
+        if provider_status in (408, 503, 504):
+            pass
+        elif provider_status == 429:
+            category = "quota"
+        elif provider_status in (401, 403):
+            category = "permission"
+        elif provider_status in (400, 404, 422):
+            category = "model"
+        elif provider_status is None:
+            classifications = {
+                "DEADLINE_EXCEEDED": ("provider", 504),
+                "UNAVAILABLE": ("provider", 503),
+                "RESOURCE_EXHAUSTED": ("quota", 429),
+                "TOO_MANY_REQUESTS": ("quota", 429),
+                "UNAUTHENTICATED": ("permission", 403),
+                "PERMISSION_DENIED": ("permission", 403),
+                "NOT_FOUND": ("model", 404),
+                "INVALID_ARGUMENT": ("model", 404),
+            }
+            category, http_status = classifications.get(status_name, ("provider", 502))
+        return GeminiProviderError(
+            category, http_status, upstream_http_status=upstream_status,
+        )
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
+        return GeminiProviderError("timeout", 504)
+    return GeminiProviderError("provider", 502)
 
 
 def _mentions_supplier(text, supplier):

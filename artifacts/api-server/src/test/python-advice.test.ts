@@ -157,24 +157,36 @@ test("safe failure response drops unrecognized provider details", async () => {
 });
 
 test("AI failure/unavailability preserves deterministic warnings and quote attribution", async () => {
-  for (const status of ["failed", "unavailable"]) {
-    const r = reply();
+  const failures = [
+    { category: "timeout", http_status: 504 },
+    { category: "provider", http_status: 503 },
+    { category: "provider", http_status: 504 },
+    { category: "provider", http_status: 502 },
+    { category: "configuration", http_status: null },
+  ] as const;
+  for (const failure of failures) {
+    const record = fixture();
+    const before = structuredClone(record);
+    const status = failure.category === "configuration" ? "unavailable" : "failed";
+    const r = reply(record);
     r.ai_status = status; r.ai_advice = TOKEN;
-    r.ai_failure = status === "failed"
-      ? { category: "provider", http_status: 502 }
-      : { category: "configuration", http_status: null };
+    r.ai_failure = failure;
     const warning = { quote_id: r.suppliers[1].quote_id, supplier: r.suppliers[1].name,
       type: "TOTAL_COST_MISMATCH", severity: "high", message: "Fixture mismatch" };
     r.warnings = [warning]; r.warning_count = 1; r.suppliers[1].anomalies = [warning];
-    const result = await client(r)(fixture(), {}, NOW);
+    const result = await client(r)(record, {}, NOW);
     assert.equal(result.aiStatus, status);
-    assert.deepEqual(result.aiFailure, status === "failed"
-      ? { category: "provider", httpStatus: 502 }
-      : { category: "configuration", httpStatus: null });
+    assert.deepEqual(result.aiFailure, {
+      category: failure.category, httpStatus: failure.http_status,
+    });
     assert.equal(result.warnings[0].offerId, 712);
     assert.equal(result.suppliers[0].anomalies.length, 0);
     assert.equal(result.suppliers[1].anomalies.length, 1);
     assert.equal(result.advice?.includes(TOKEN), false);
+    assert.match(result.advice!, /AI advice is unavailable/);
+    assert.equal(result.suppliers[0].withinBudget, true);
+    assert.equal(result.suppliers[1].withinBudget, false);
+    assert.deepEqual(record, before, "Advice failures must not change stored offers, scores or ranks");
   }
 });
 
@@ -211,6 +223,11 @@ test("real Gemini error handling through FastAPI and adapter preserves checks wi
     denied: { category: "permission", status: 403 },
     model: { category: "model", status: 404 },
     timeout: { category: "timeout", status: 504 },
+    unavailable: { category: "provider", status: 503 },
+    upstream_deadline: { category: "provider", status: 504 },
+    connection: { category: "provider", status: 502 },
+    unexpected: { category: "provider", status: 502 },
+    misleading_timeout_name: { category: "provider", status: 502 },
     empty: { category: "provider", status: 502 },
   } as const;
   for (const [failure, expected] of Object.entries(failures)) {
@@ -220,13 +237,20 @@ test("real Gemini error handling through FastAPI and adapter preserves checks wi
       const output = execFileSync("python", ["-c", [
         "import json,sys,os",
         "from unittest.mock import Mock,patch",
-        "from google.genai.errors import ClientError",
+        "from google.genai.errors import ClientError,ServerError",
+        "from httpx import ReadTimeout,ConnectError,Response",
         "from fastapi.testclient import TestClient",
         "from api import app",
         "client=Mock()",
         "mode=sys.argv[1]",
         "if mode=='empty': client.models.generate_content.return_value.text=''",
-        "elif mode=='timeout': client.models.generate_content.side_effect=TimeoutError('fixture-private-provider-detail')",
+        "elif mode=='timeout': client.models.generate_content.side_effect=ReadTimeout('fixture-private-provider-detail')",
+        "elif mode=='connection': client.models.generate_content.side_effect=ConnectError('fixture-private-provider-detail')",
+        "elif mode=='unexpected': client.models.generate_content.side_effect=RuntimeError('fixture-private-provider-detail')",
+        "elif mode=='misleading_timeout_name': client.models.generate_content.side_effect=type('TimeoutConfigurationError',(Exception,),{})('fixture-private-provider-detail')",
+        "elif mode in ('unavailable','upstream_deadline'):",
+        " code=503 if mode=='unavailable' else 504",
+        " client.models.generate_content.side_effect=ServerError(code,{'error':{'message':'fixture-private-provider-detail','status':'UNAVAILABLE' if code==503 else 'DEADLINE_EXCEEDED'}},response=Response(code))",
         "else: client.models.generate_content.side_effect=ClientError(429 if mode=='quota' else 403, {'error':{'message':'fixture-private-provider-detail','status':'RESOURCE_EXHAUSTED' if mode=='quota' else 'PERMISSION_DENIED'}})",
         "if mode=='model': client.models.generate_content.side_effect=ClientError(404, {'error':{'message':'fixture-private-provider-detail','status':'NOT_FOUND'}})",
         "with patch('ai_advisor.client',client), TestClient(app) as c:",
