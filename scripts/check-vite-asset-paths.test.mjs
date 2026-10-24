@@ -859,6 +859,59 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("checks extensionless local candidates in JavaScript srcset values", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const image = document.createElement("img");
+      image.srcset = "/preview/assets/thumb 1x, /preview/media/hero 2x, https://cdn.example.test/images/remote 3x, /preview/products/item 4x, /preview/api/image 5x";
+      image.setAttribute("srcset", "/preview/images/brandmark 320w");`,
+    );
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    mkdirSync(join(outputDirectory, "images"), { recursive: true });
+    for (const [directory, file] of [
+      [assetsDirectory, "thumb"],
+      [join(outputDirectory, "media"), "hero"],
+      [join(outputDirectory, "images"), "brandmark"],
+    ]) {
+      writeFileSync(join(directory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing extensionless local candidates in JavaScript srcset values", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const image = document.createElement("img");
+      image.srcset = "/preview/assets/present 1x, /preview/assets/missing-candidate 2x, https://cdn.example.test/images/remote 3x, /preview/products/item 4x, /preview/api/image 5x";`,
+    );
+    writeFileSync(join(assetsDirectory, "present"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /"\/preview\/assets\/missing-candidate"/);
+        assert.doesNotMatch(
+          error.message,
+          /cdn\.example\.test|products\/item|api\/image/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("ignores missing asset paths in JavaScript comments without treating string contents as comments", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script>',

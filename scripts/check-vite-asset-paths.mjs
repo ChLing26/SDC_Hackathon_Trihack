@@ -32,6 +32,8 @@ const quotedLocalURLPattern =
   /(["'\x60])((?:\/|\.\.?\/)[^"'\x60\s()<>;,]+)\1/g;
 const directMediaURLAssignmentPattern =
   /(?:\.\s*(?:src|poster)\s*=\s*|\.setAttribute\s*\(\s*["'](?:src|poster)["']\s*,\s*|(?:src|poster)\s*:\s*)(?:new\s+URL\s*\(\s*)?$/i;
+const directSrcsetAssignmentPattern =
+  /(?:\.\s*srcset\s*=\s*|\.setAttribute\s*\(\s*["']srcset["']\s*,\s*|["']srcset["']\s*:\s*)$/i;
 const cssUrlReferencePattern = new RegExp(
   String.raw`url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\(?:[0-9a-fA-F]{1,6}[\t\n\f\r ]?|[\s\S])|[^)\s])*))\s*\)`,
   "gi",
@@ -255,6 +257,22 @@ function collectJavaScriptStringAssetReferences(source) {
     )) {
       references.push({ url: match[1], index: literal.index });
     }
+
+    if (
+      directSrcsetAssignmentPattern.test(
+        source.slice(Math.max(0, literal.index - 120), literal.index),
+      )
+    ) {
+      for (const url of collectSrcsetURLs(decodedValue)) {
+        if (
+          isExtensionlessMediaURL(url) &&
+          isSrcsetImageDirectoryURL(url) &&
+          !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)
+        ) {
+          references.push({ url, index: literal.index });
+        }
+      }
+    }
   }
 
   return { references, ranges };
@@ -359,6 +377,18 @@ function isMediaDirectoryURL(url) {
   try {
     return /(?:^|\/)(?:media|images?|img|audio|video|icons?)(?:\/|$)/i.test(
       new URL(url, "http://preview.local/").pathname,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isSrcsetImageDirectoryURL(url) {
+  try {
+    const pathname = new URL(url, "http://preview.local/").pathname;
+    return (
+      !/(?:^|\/)api(?:\/|$)/i.test(pathname) &&
+      /(?:^|\/)(?:assets|media|images?|img)(?:\/|$)/i.test(pathname)
     );
   } catch {
     return false;
