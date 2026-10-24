@@ -89,12 +89,6 @@ User ──► Replit Fronted ──► Python Backend (FastAPI) ──► Procu
 
 ### Option 1 — Run on Replit (Recommended)
 
-1. Open the [Replit Project](https://replit.com/@your-username/your-project), or import this repository via **Create Repl → Import from GitHub**.
-2. Open the **Secrets** tab (🔒) and add the variables listed in `.env.example`:
-   - `RUNPOD_API_KEY`
-   - `RUNPOD_ENDPOINT_ID`
-3. Click **Run**. Replit uses the `.replit` file to start `python src/main.py`.
-
 1. Open the [TriHack_SDC Hackaton]()
 2. Open the **Secrets** tab and add the required environment variables from `.env.example`, such as:
    - `GEMINI_API_KEY`
@@ -192,10 +186,10 @@ python -m unittest discover tests
 - [/] Team name, domain (Domain 1 / Domain 2) and SDG track filled in
 - [ ] Slide deck link added
 - [ ] Demo video link added
-- [ ] Replit used, with proof of use in `submission/`
-- [ ] Preliminary submission completed (`SDC2026_TeamName_Preliminary.pdf`)
-- [ ] Technology declaration completed (`SDC2026_TeamName_TechDeclaration.pdf`)
-- [ ] Submission files renamed with your team name (replace `TeamName`)
+- [/] Replit used, with proof of use in `submission/`
+- [/] Preliminary submission completed (`SDC2026_TeamName_Preliminary.pdf`)
+- [/] Technology declaration completed (`SDC2026_TeamName_TechDeclaration.pdf`)
+- [/] Submission files renamed with your team name (replace `TeamName`)
 - [/] "How to Run" steps verified
 - [ ] No API keys or secrets committed to the repository
 
