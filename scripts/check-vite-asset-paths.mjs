@@ -224,6 +224,11 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
               document.source,
               resolveFrom,
             ),
+            ...collectInlineSVGReferences(
+              document.html,
+              document.source,
+              resolveFrom,
+            ),
             ...collectIframeSrcdocReferences(
               document.html,
               document.source,
@@ -609,6 +614,49 @@ function collectBuiltSVGReferences(outputDirectory) {
   return references;
 }
 
+function collectInlineSVGReferences(
+  html,
+  sourcePrefix = "index.html",
+  resolveFrom,
+) {
+  const references = [];
+  const svgTagPattern = /<\/?svg\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi;
+  let svgStart = -1;
+  let nestingLevel = 0;
+  const collectReferences = (svg) =>
+    collectSVGReferences(svg, sourcePrefix).map((reference) =>
+      resolveFrom ? { ...reference, resolveFrom } : reference,
+    );
+
+  for (const match of html.matchAll(svgTagPattern)) {
+    const isClosingTag = /^<\//.test(match[0]);
+    const isSelfClosingTag = /\/\s*>$/.test(match[0]);
+
+    if (isClosingTag) {
+      if (nestingLevel === 0) continue;
+      nestingLevel -= 1;
+      if (nestingLevel === 0) {
+        references.push(
+          ...collectReferences(
+            html.slice(svgStart, match.index + match[0].length),
+          ),
+        );
+        svgStart = -1;
+      }
+    } else {
+      if (nestingLevel === 0) svgStart = match.index;
+      if (!isSelfClosingTag) {
+        nestingLevel += 1;
+      } else if (nestingLevel === 0) {
+        references.push(...collectReferences(match[0]));
+        svgStart = -1;
+      }
+    }
+  }
+
+  return references;
+}
+
 function collectSVGReferences(svg, source) {
   const references = [];
   const resourceElements =
@@ -815,6 +863,11 @@ function collectIframeSrcdocReferences(
     references.push(
       ...collectHTMLReferences(embeddedHtml, iframeSource, resolveFrom),
       ...collectInlineStyleReferences(embeddedHtml, iframeSource, resolveFrom),
+      ...collectInlineSVGReferences(
+        embeddedHtml,
+        iframeSource,
+        resolveFrom,
+      ),
       ...collectIframeSrcdocReferences(
         embeddedHtml,
         iframeSource,
@@ -1031,6 +1084,11 @@ function collectIframePageReferences(
           document.url.href,
         ),
         ...collectInlineStyleReferences(
+          document.html,
+          document.source,
+          document.url.href,
+        ),
+        ...collectInlineSVGReferences(
           document.html,
           document.source,
           document.url.href,
@@ -1656,6 +1714,7 @@ export function checkAssetPaths(app, {
   const references = [
     ...collectHTMLReferences(html),
     ...collectInlineStyleReferences(html),
+    ...collectInlineSVGReferences(html),
     ...collectIframeSrcdocReferences(html),
     ...collectIframePageReferences(html, {
       outputDirectory,

@@ -1671,6 +1671,67 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("checks existing inline SVG resources against the configured base path and allows external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      name: "InlineSVGExisting",
+      basePath: "/__mockup/",
+      html: `<script src="/__mockup/assets/app.js"></script>
+        <svg xmlns="http://www.w3.org/2000/svg">
+          <image href="./assets/images/existing.webp"/>
+          <link rel="stylesheet" href="./assets/styles/site.css"/>
+          <style>@font-face { src: url("./assets/fonts/site.woff2"); }</style>
+          <image href="https://cdn.example.test/external.webp"/>
+          <image href="data:image/png;base64,AAAA"/>
+          <image href="#local-symbol"/>
+        </svg>
+        <iframe srcdoc='<svg xmlns="http://www.w3.org/2000/svg"><image href="/__mockup/assets/images/frame.webp"/></svg>'></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets", "images"), { recursive: true });
+    mkdirSync(join(outputDirectory, "assets", "styles"), { recursive: true });
+    mkdirSync(join(outputDirectory, "assets", "fonts"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(
+      join(outputDirectory, "assets", "images", "existing.webp"),
+      "",
+    );
+    writeFileSync(join(outputDirectory, "assets", "images", "frame.webp"), "");
+    writeFileSync(join(outputDirectory, "assets", "styles", "site.css"), "");
+    writeFileSync(join(outputDirectory, "assets", "fonts", "site.woff2"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing inline SVG images, stylesheets, and fonts with the app and URLs", () => {
+    const { app, outputDirectory } = createApp({
+      name: "InlineSVGMissing",
+      basePath: "/__mockup/",
+      html: `<script src="/__mockup/assets/app.js"></script>
+        <svg xmlns="http://www.w3.org/2000/svg">
+          <image href="./assets/images/missing.webp"/>
+          <link rel="stylesheet" href="./assets/styles/missing.css"/>
+          <style>@font-face { src: url("./assets/fonts/missing.woff2"); }</style>
+        </svg>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /InlineSVGMissing build output is missing files/,
+        );
+        assert.match(error.message, /"\.\/assets\/images\/missing\.webp"/);
+        assert.match(error.message, /"\.\/assets\/styles\/missing\.css"/);
+        assert.match(error.message, /"\.\/assets\/fonts\/missing\.woff2"/);
+        return true;
+      },
+    );
+  });
+
   it("ignores image and font URLs in CSS comments but validates active URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `<link rel="stylesheet" href="/preview/assets/styles.css"><script src="/preview/assets/app.js"></script>
