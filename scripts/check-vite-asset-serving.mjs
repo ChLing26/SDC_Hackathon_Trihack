@@ -147,6 +147,25 @@ function assertResponse(
   }
 }
 
+function assertResponseStaysWithinPreview(
+  response,
+  requestUrl,
+  previewOrigin,
+  basePath,
+  appName,
+  requestLabel,
+) {
+  const finalUrl = response.url ? new URL(response.url) : new URL(requestUrl);
+  if (
+    finalUrl.origin !== previewOrigin ||
+    !finalUrl.pathname.startsWith(basePath)
+  ) {
+    throw new Error(
+      `${appName} ${requestLabel} request ${requestUrl} redirected outside configured preview origin or path "${basePath}": final URL ${finalUrl.href}.`,
+    );
+  }
+}
+
 function assertWasmResponse(response, requestUrl, appName) {
   if (!response.ok) {
     throw new Error(
@@ -313,6 +332,7 @@ export async function checkServedAssets(
   }
 
   const origin = baseUrl ?? `http://127.0.0.1:${app.port}`;
+  const previewOrigin = new URL(origin).origin;
   const normalizedBasePath = basePath.endsWith("/") ? basePath : `${basePath}/`;
   const rootPageUrl = new URL(normalizedBasePath, origin).href;
   const nestedPath = `${normalizedBasePath}__asset-check__/nested/`;
@@ -353,6 +373,14 @@ export async function checkServedAssets(
           `${app.name} ${assetTypes[type].label} request ${resolvedAssetUrl.href} failed: ${error.message}`,
         );
       }
+      assertResponseStaysWithinPreview(
+        response,
+        resolvedAssetUrl.href,
+        previewOrigin,
+        normalizedBasePath,
+        app.name,
+        assetTypes[type].label,
+      );
       assertResponse(response, type, resolvedAssetUrl.href, app.name);
     }
   }
@@ -380,6 +408,14 @@ export async function checkServedAssets(
         `${app.name} responsive image request ${imageUrl} failed: ${error.message}`,
       );
     }
+    assertResponseStaysWithinPreview(
+      response,
+      imageUrl,
+      previewOrigin,
+      normalizedBasePath,
+      app.name,
+      "responsive image",
+    );
     assertResponse(response, "media", imageUrl, app.name, "responsive image");
   }
 
@@ -390,7 +426,9 @@ export async function checkServedAssets(
   )) {
     const sourceUrl = new URL(source, new URL(normalizedBasePath, origin));
     const scriptUrl = new URL(specifier, sourceUrl);
-    const requestLabel = isWorker ? "web worker" : "lazy-loaded JavaScript chunk";
+    const requestLabel = isWorker
+      ? "web worker"
+      : "lazy-loaded JavaScript chunk";
     if (
       scriptUrl.origin !== new URL(origin).origin ||
       !scriptUrl.pathname.startsWith(normalizedBasePath)
@@ -411,6 +449,14 @@ export async function checkServedAssets(
         `${app.name} lazy-loaded JavaScript chunk request ${chunkUrl} failed: ${error.message}`,
       );
     }
+    assertResponseStaysWithinPreview(
+      response,
+      chunkUrl,
+      previewOrigin,
+      normalizedBasePath,
+      app.name,
+      "lazy-loaded JavaScript chunk",
+    );
     assertResponse(
       response,
       "js",
@@ -429,6 +475,14 @@ export async function checkServedAssets(
         `${app.name} web worker request ${workerUrl} failed: ${error.message}`,
       );
     }
+    assertResponseStaysWithinPreview(
+      response,
+      workerUrl,
+      previewOrigin,
+      normalizedBasePath,
+      app.name,
+      "web worker",
+    );
     assertResponse(response, "js", workerUrl, app.name, "web worker");
   }
 
@@ -458,6 +512,14 @@ export async function checkServedAssets(
         `${app.name} WebAssembly request ${wasmUrl} failed: ${error.message}`,
       );
     }
+    assertResponseStaysWithinPreview(
+      response,
+      wasmUrl,
+      previewOrigin,
+      normalizedBasePath,
+      app.name,
+      "WebAssembly",
+    );
     assertWasmResponse(response, wasmUrl, app.name);
   }
 

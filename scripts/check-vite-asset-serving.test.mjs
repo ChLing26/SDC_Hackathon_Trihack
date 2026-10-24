@@ -36,10 +36,12 @@ function makeBuiltApp() {
 }
 
 function response(body, contentType, status = 200, url = "") {
-  return new Response(body, {
+  const result = new Response(body, {
     status,
     headers: { "content-type": contentType },
   });
+  if (url) Object.defineProperty(result, "url", { value: url });
+  return result;
 }
 
 describe("served Vite asset paths", () => {
@@ -180,7 +182,9 @@ new URL("./feature.wasm", import.meta.url);`,
     );
 
     assert.ok(requests.includes("/__mockup/assets/feature.wasm"));
-    assert.ok(requests.includes("/__mockup/assets/features/nested-feature.wasm?init"));
+    assert.ok(
+      requests.includes("/__mockup/assets/features/nested-feature.wasm?init"),
+    );
   });
 
   it("fails when a referenced WebAssembly file returns an HTTP error", async () => {
@@ -377,6 +381,95 @@ new SharedWorker("/__mockup/assets/shared-worker.js");`,
         log: () => {},
       }),
       /Canvas media request .* returned content type "text\/html"/,
+    );
+  });
+
+  it("rejects an asset response redirected outside the configured preview path", async () => {
+    const app = makeBuiltApp();
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".svg")) {
+        return response(
+          "<svg/>",
+          "image/svg+xml",
+          200,
+          "http://preview.local/assets/icon.svg",
+        );
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas media request .* redirected outside configured preview origin or path "\/__mockup\/": final URL http:\/\/preview\.local\/assets\/icon\.svg/,
+    );
+  });
+
+  it("rejects an asset response redirected to a different origin", async () => {
+    const app = makeBuiltApp();
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".svg")) {
+        return response(
+          "<svg/>",
+          "image/svg+xml",
+          200,
+          "https://other.example/__mockup/assets/icon.svg",
+        );
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Canvas media request .* redirected outside configured preview origin or path "\/__mockup\/": final URL https:\/\/other\.example\/__mockup\/assets\/icon\.svg/,
+    );
+  });
+
+  it("allows an asset redirect that stays under the configured preview path", async () => {
+    const app = makeBuiltApp();
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith(".svg")) {
+        return response(
+          "<svg/>",
+          "image/svg+xml",
+          200,
+          "http://preview.local/__mockup/assets/final-icon.svg",
+        );
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      return response("<div id='root'></div>", "text/html", 200, url.href);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
     );
   });
 
