@@ -973,6 +973,7 @@ function isPreviewOriginReference(reference, baseURL) {
 
 function collectStaticJavaScriptSrcdoc(source, codeSource) {
   const codeMask = maskJavaScriptLiterals(source);
+  const bindings = collectStaticJavaScriptStringBindings(source);
   const assignmentPatterns = [
     /(?:\.\s*srcdoc\s*=\s*|\[\s*["']srcdoc["']\s*\]\s*=\s*)/gi,
     /\.\s*setAttribute\s*\(\s*["']srcdoc["']\s*,\s*/gi,
@@ -991,14 +992,23 @@ function collectStaticJavaScriptSrcdoc(source, codeSource) {
       seenAssignments.add(match.index);
 
       const valueStart = match.index + match[0].length;
-      const literal = parseStaticJavaScriptString(source, valueStart);
-      if (!literal) continue;
+      const expression = parseStaticJavaScriptStringExpression(
+        source,
+        valueStart,
+        bindings,
+      );
+      if (
+        !expression ||
+        !isStaticJavaScriptExpressionBoundary(source, expression.end)
+      ) {
+        continue;
+      }
 
       const line = lineNumberAt(source, match.index);
       documents.push({
-        html: literal.value,
+        html: expression.value,
         start: valueStart,
-        end: literal.end,
+        end: expression.end,
         source: `${codeSource}:${line} iframe[srcdoc]`,
       });
     }

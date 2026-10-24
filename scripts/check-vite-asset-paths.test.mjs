@@ -771,6 +771,84 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("reports missing assets in concatenated JavaScript srcdoc fragments", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const opening = '<main>';
+const missingImage = '<img src="/preview/assets/missing-fragment.webp">';
+const closing = '</main>';
+const frame = document.querySelector("iframe");
+frame.srcdoc = opening + missingImage + closing;`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /build output is missing files referenced by URLs:.*"\/preview\/assets\/missing-fragment\.webp" in assets\/app\.js:5 iframe\[srcdoc\]:1 img\[src\]/s,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect prefixes in concatenated JavaScript srcdoc fragments", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const opening = '<main>';
+const wrongPrefixImage = '<img src="/assets/wrong-fragment.webp">';
+const closing = '</main>';
+const frame = document.querySelector("iframe");
+frame.srcdoc = opening + wrongPrefixImage + closing;`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-fragment\.webp" in assets\/app\.js:5 iframe\[srcdoc\]:1 img\[src\]/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("checks statically composed srcdoc and ignores non-static expressions", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const image = '<img src="/preview/assets/composed-frame.webp">';
+const wrapperStart = '<main>';
+const wrapperEnd = '</main>';
+const frame = document.querySelector("iframe");
+frame.srcdoc = wrapperStart + image + wrapperEnd;
+frame.setAttribute("srcdoc", \`<section>\${image}</section>\`);
+frame.srcdoc = '<img src="' + getRuntimeAssetURL() + '">';`,
+    );
+    writeFileSync(join(assetsDirectory, "composed-frame.webp"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
   it("checks local assets in same-origin iframe pages relative to the iframe URL", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
