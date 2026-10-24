@@ -334,6 +334,70 @@ new URL("./feature.wasm", import.meta.url);`,
     );
   });
 
+  it("requests emitted WebAssembly files matched by runtime template and concatenation URLs", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "app.js"),
+      `const variant = getVariant();
+new URL(\`./features/feature-\${variant}.wasm?init\`, import.meta.url);
+new URL("./features/" + featureName + "-worker.wasm", import.meta.url);
+new URL(\`/__mockup/assets/features/root-\${variant}.wasm\`, import.meta.url);
+const label = \`./features/not-a-real-\${variant}.wasm\`;
+new URL(\`https://cdn.example/\${variant}.wasm\`, import.meta.url);`,
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "feature-alpha.wasm"),
+      "wasm",
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "feature-beta-worker.wasm"),
+      "wasm",
+    );
+    writeFileSync(
+      join(tempRoot, "dist", "assets", "features", "root-alpha.wasm"),
+      "wasm",
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname + url.search);
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
+        return response("<div id='root'></div>", "text/html", 200, url.href);
+      }
+      if (url.pathname.endsWith(".wasm")) {
+        return response("wasm", "application/wasm; charset=binary");
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("missing", "text/html", 404);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+    );
+
+    assert.ok(
+      requests.includes("/__mockup/assets/features/feature-alpha.wasm?init"),
+    );
+    assert.ok(
+      requests.includes("/__mockup/assets/features/feature-beta-worker.wasm"),
+    );
+    assert.ok(requests.includes("/__mockup/assets/features/root-alpha.wasm"));
+    assert.ok(!requests.includes("/__mockup/assets/features/not-a-real.wasm"));
+  });
+
   it("fails when a referenced WebAssembly file returns an HTTP error", async () => {
     const app = makeBuiltApp();
     writeFileSync(

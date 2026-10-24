@@ -521,6 +521,7 @@ export async function checkServedAssets(
   const wasmUrls = new Set();
   for (const { source, url: specifier } of collectBuiltWasmReferences(
     outputDirectory,
+    normalizedBasePath,
   )) {
     const sourceUrl = new URL(source, new URL(normalizedBasePath, origin));
     const wasmUrl = new URL(specifier, sourceUrl);

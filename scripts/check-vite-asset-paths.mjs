@@ -1980,13 +1980,295 @@ export function collectSrcsetURLs(srcset) {
   return urls;
 }
 
-export function collectBuiltWasmReferences(outputDirectory) {
-  return collectBuiltCodeReferences(outputDirectory, "/").filter(
+export function collectBuiltWasmReferences(outputDirectory, basePath = "/") {
+  const references = collectBuiltCodeReferences(outputDirectory, "/").filter(
     ({ source, url, resolvedUrl }) =>
       /\.m?js$/i.test(source) &&
       /\.wasm(?:[?#]|$)/i.test(resolvedUrl ?? url) &&
+      !String(resolvedUrl ?? url).includes("${") &&
+      !String(resolvedUrl ?? url).startsWith("-") &&
       !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl ?? url),
   );
+  const seenReferences = new Set(
+    references.map(({ source, url }) => `${source}\0${url}`),
+  );
+
+  for (const reference of collectRuntimeBuiltWasmReferences(
+    outputDirectory,
+    basePath,
+  )) {
+    const key = `${reference.source}\0${reference.url}`;
+    if (seenReferences.has(key)) continue;
+    seenReferences.add(key);
+    references.push(reference);
+  }
+
+  return references;
+}
+
+function collectRuntimeBuiltWasmReferences(outputDirectory, basePath) {
+  const javascriptFiles = [];
+  const wasmFiles = [];
+  const pendingDirectories = [outputDirectory];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+      } else if (entry.isFile()) {
+        const file = relative(outputDirectory, entryPath).split(sep).join("/");
+        if (/\.(?:m?js)$/i.test(entry.name)) javascriptFiles.push(file);
+        if (/\.wasm$/i.test(entry.name)) wasmFiles.push(file);
+      }
+    }
+  }
+
+  const references = [];
+  const origin = "http://preview.local";
+  const normalizedBasePath = basePath.endsWith("/") ? basePath : `${basePath}/`;
+  const dynamicSegment = "__RUNTIME_WASM_SEGMENT__";
+  const callPattern = /\bnew\s+URL\s*\(/g;
+
+  for (const source of javascriptFiles) {
+    const content = stripJavaScriptComments(
+      readFileSync(resolve(outputDirectory, source), "utf8"),
+    );
+    const codeMask = maskJavaScriptLiterals(content);
+
+    for (const match of content.matchAll(callPattern)) {
+      if (codeMask[match.index] === " ") continue;
+      const openingParenthesis = match.index + match[0].lastIndexOf("(");
+      const firstArgument = findFirstJavaScriptArgument(
+        content,
+        openingParenthesis + 1,
+      );
+      if (!firstArgument) continue;
+
+      const base = content
+        .slice(firstArgument.comma + 1)
+        .match(/^\s*import\s*\.\s*meta\s*\.\s*url\s*\)/);
+      if (!base) continue;
+
+      const pattern = parseRuntimeWasmURLPattern(
+        content.slice(openingParenthesis + 1, firstArgument.comma),
+      );
+      if (!pattern || !pattern.dynamic) continue;
+      if (!/^(?:\/|\.{1,2}\/)/.test(pattern.value)) continue;
+      if (/^(?:\/\/|\/\*|\.\.\/\.\.\/)/.test(pattern.value)) continue;
+
+      const moduleURL = new URL(source, new URL(normalizedBasePath, origin));
+      const patternURL = new URL(
+        pattern.value.replaceAll("\0", dynamicSegment),
+        moduleURL,
+      );
+      if (
+        patternURL.origin !== origin ||
+        !/\.wasm$/i.test(patternURL.pathname)
+      ) {
+        continue;
+      }
+
+      const patternPath = patternURL.pathname;
+      const suffixStart = pattern.value.search(/[?#]/);
+      const urlSuffix =
+        suffixStart === -1 ? "" : pattern.value.slice(suffixStart);
+      const pathPattern = new RegExp(
+        `^${patternPath
+          .split(dynamicSegment)
+          .map(escapeRegExp)
+          .join("[^/]+")}$`,
+      );
+
+      for (const wasmFile of wasmFiles) {
+        const emittedPath = new URL(`${normalizedBasePath}${wasmFile}`, origin)
+          .pathname;
+        if (!pathPattern.test(emittedPath)) continue;
+
+        let specifier = relative(dirname(source), wasmFile)
+          .split(sep)
+          .join("/");
+        if (!specifier.startsWith(".")) specifier = `./${specifier}`;
+        references.push({ source, url: `${specifier}${urlSuffix}` });
+      }
+    }
+  }
+
+  return references;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findFirstJavaScriptArgument(source, start) {
+  let parentheses = 0;
+  let brackets = 0;
+  let braces = 0;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "'" || character === '"' || character === "`") {
+      const end = findJavaScriptLiteralEnd(source, index);
+      if (end === -1) return null;
+      index = end - 1;
+      continue;
+    }
+    if (character === "(") parentheses += 1;
+    else if (character === ")") {
+      if (parentheses === 0 && brackets === 0 && braces === 0) return null;
+      parentheses -= 1;
+    } else if (character === "[") brackets += 1;
+    else if (character === "]") brackets -= 1;
+    else if (character === "{") braces += 1;
+    else if (character === "}") braces -= 1;
+    else if (
+      character === "," &&
+      parentheses === 0 &&
+      brackets === 0 &&
+      braces === 0
+    ) {
+      return { comma: index };
+    }
+  }
+
+  return null;
+}
+
+function findJavaScriptLiteralEnd(source, start) {
+  const quote = source[start];
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (source[index] === "\\") {
+      index += 1;
+    } else if (
+      quote === "`" &&
+      source[index] === "$" &&
+      source[index + 1] === "{"
+    ) {
+      const expressionEnd = findJavaScriptTemplateExpressionEnd(
+        source,
+        index + 1,
+      );
+      if (expressionEnd === -1) return -1;
+      index = expressionEnd;
+    } else if (source[index] === quote) {
+      return index + 1;
+    }
+  }
+  return -1;
+}
+
+function findJavaScriptTemplateExpressionEnd(source, openingBrace) {
+  let depth = 1;
+  for (let index = openingBrace + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "'" || character === '"' || character === "`") {
+      const end = findJavaScriptLiteralEnd(source, index);
+      if (end === -1) return -1;
+      index = end - 1;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function parseRuntimeWasmURLPattern(expression) {
+  const parts = [];
+  let start = 0;
+  let parentheses = 0;
+  let brackets = 0;
+  let braces = 0;
+
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index];
+    if (character === "'" || character === '"' || character === "`") {
+      const end = findJavaScriptLiteralEnd(expression, index);
+      if (end === -1) return null;
+      index = end - 1;
+    } else if (character === "(") {
+      parentheses += 1;
+    } else if (character === ")") {
+      parentheses -= 1;
+    } else if (character === "[") {
+      brackets += 1;
+    } else if (character === "]") {
+      brackets -= 1;
+    } else if (character === "{") {
+      braces += 1;
+    } else if (character === "}") {
+      braces -= 1;
+    } else if (
+      character === "+" &&
+      parentheses === 0 &&
+      brackets === 0 &&
+      braces === 0
+    ) {
+      parts.push(expression.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  parts.push(expression.slice(start).trim());
+
+  let value = "";
+  let dynamic = false;
+  for (let part of parts) {
+    while (part.startsWith("(") && part.endsWith(")")) {
+      part = part.slice(1, -1).trim();
+    }
+    if (!part) return null;
+
+    if (part[0] === "'" || part[0] === '"') {
+      const literal = parseStaticJavaScriptString(part, 0);
+      if (!literal || literal.end !== part.length) return null;
+      value += literal.value;
+    } else if (part[0] === "`") {
+      const template = parseRuntimeWasmTemplate(part);
+      if (!template) return null;
+      value += template.value;
+      dynamic ||= template.dynamic;
+    } else if (/^[$\w]+(?:\s*\.\s*[$\w]+)*(?:\s*\([^;]*\))?$/.test(part)) {
+      value += "\0";
+      dynamic = true;
+    } else {
+      return null;
+    }
+  }
+
+  return { value, dynamic };
+}
+
+function parseRuntimeWasmTemplate(template) {
+  let value = "";
+  let chunkStart = 1;
+  let dynamic = false;
+
+  for (let index = 1; index < template.length; index += 1) {
+    if (template[index] === "\\") {
+      index += 1;
+    } else if (template[index] === "$" && template[index + 1] === "{") {
+      value += decodeJavaScriptString(template.slice(chunkStart, index));
+      const expressionEnd = findJavaScriptTemplateExpressionEnd(
+        template,
+        index + 1,
+      );
+      if (expressionEnd === -1) return null;
+      value += "\0";
+      dynamic = true;
+      index = expressionEnd;
+      chunkStart = index + 1;
+    } else if (template[index] === "`") {
+      if (index !== template.length - 1) return null;
+      value += decodeJavaScriptString(template.slice(chunkStart, index));
+      return { value, dynamic };
+    }
+  }
+
+  return null;
 }
 
 export function checkAssetPaths(app, {
