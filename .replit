@@ -1,0 +1,53 @@
+modules = ["nodejs-24", "python-3.12", "postgresql-16"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Private Python Advice"
+
+[[workflows.workflow]]
+name = "Private Python Advice"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m src.main --service advice --port 8000"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+packages = ["libxcrypt"]
+
+[userenv]
+
+[userenv.shared]
+
+[userenv.development]
+PIP_TARGET = "/home/runner/workspace/.pythonlibs/lib/python3.12/site-packages"
+PIP_USER = "false"
+GEMINI_MODEL = "gemini-3.8-flash"

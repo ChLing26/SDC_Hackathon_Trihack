@@ -1,7 +1,12 @@
 import os
+import re
+from math import isfinite
 from pathlib import Path
 from dotenv import load_dotenv
+import httpx
 from google import genai
+from google.genai import errors, types
+from src.backend_numbers import MAX_MONEY, bounded_decimal, checked_total
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -13,10 +18,144 @@ load_dotenv(dotenv_path=ENV_PATH, override=False)
 
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-# Create the client only when a key is available.
-client = genai.Client(api_key=API_KEY) if API_KEY else None
+GEMINI_REQUEST_TIMEOUT_MS = 15_000
+GEMINI_REQUEST_ATTEMPTS = 1
 
-MODEL_NAME = "gemini-3.8-flash"
+
+def _gemini_http_options():
+    return types.HttpOptions(
+        timeout=GEMINI_REQUEST_TIMEOUT_MS,
+        retry_options=types.HttpRetryOptions(
+            attempts=GEMINI_REQUEST_ATTEMPTS,
+        ),
+    )
+
+
+# Create the client only when a key is available.
+client = (
+    genai.Client(api_key=API_KEY, http_options=_gemini_http_options())
+    if API_KEY else None
+)
+
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
+
+
+class AIConfigurationError(RuntimeError):
+    """Gemini has no configured credential; not a successful AI response."""
+
+
+GEMINI_FAILURE_CATEGORIES = frozenset({
+    "quota", "permission", "model", "timeout", "provider",
+})
+SAFE_PROVIDER_HTTP_STATUSES = frozenset({
+    400, 401, 403, 404, 408, 409, 413, 415, 422, 429,
+    500, 501, 502, 503, 504,
+})
+
+
+class GeminiProviderError(RuntimeError):
+    """A provider failure with bounded, non-sensitive diagnostic fields only."""
+
+    def __init__(
+        self, category: str, http_status: int, *, upstream_http_status: int | None = None,
+    ):
+        if category not in GEMINI_FAILURE_CATEGORIES:
+            category = "provider"
+        if http_status not in SAFE_PROVIDER_HTTP_STATUSES:
+            http_status = 502
+        super().__init__("Gemini advice is temporarily unavailable.")
+        self.category = category
+        self.http_status = http_status
+        # Internal provenance only; never retain the SDK exception or response.
+        self.upstream_http_status = (
+            upstream_http_status
+            if type(upstream_http_status) is int
+            and upstream_http_status in SAFE_PROVIDER_HTTP_STATUSES
+            else None
+        )
+
+
+def classify_gemini_error(error: Exception) -> GeminiProviderError:
+    """Classify SDK failures without reading messages or provider response bodies."""
+    if isinstance(error, errors.APIError):
+        response_status = getattr(error.response, "status_code", None)
+        upstream_status = (
+            response_status if type(response_status) is int
+            and response_status in SAFE_PROVIDER_HTTP_STATUSES else None
+        )
+        code = upstream_status or error.code
+        provider_status = (
+            code if type(code) is int and code in SAFE_PROVIDER_HTTP_STATUSES else None
+        )
+        status_name = error.status.upper() if isinstance(error.status, str) else ""
+        category = "provider"
+        http_status = provider_status or 502
+        # HTTP deadlines are provider failures, not confirmed local timeouts.
+        # Prefer the actual HTTP status over conflicting structured status fields.
+        if provider_status in (408, 503, 504):
+            pass
+        elif provider_status == 429:
+            category = "quota"
+        elif provider_status in (401, 403):
+            category = "permission"
+        elif provider_status in (400, 404, 422):
+            category = "model"
+        elif provider_status is None:
+            classifications = {
+                "DEADLINE_EXCEEDED": ("provider", 504),
+                "UNAVAILABLE": ("provider", 503),
+                "RESOURCE_EXHAUSTED": ("quota", 429),
+                "TOO_MANY_REQUESTS": ("quota", 429),
+                "UNAUTHENTICATED": ("permission", 403),
+                "PERMISSION_DENIED": ("permission", 403),
+                "NOT_FOUND": ("model", 404),
+                "INVALID_ARGUMENT": ("model", 404),
+            }
+            category, http_status = classifications.get(status_name, ("provider", 502))
+        return GeminiProviderError(
+            category, http_status, upstream_http_status=upstream_status,
+        )
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
+        return GeminiProviderError("timeout", 504)
+    return GeminiProviderError("provider", 502)
+
+
+def _mentions_supplier(text, supplier):
+    """Match a supplier's stable quote ID or complete display name."""
+    for value in (supplier.get("quote_id"), supplier.get("name")):
+        if not value:
+            continue
+        if re.search(
+            rf"(?<!\w){re.escape(str(value))}(?!\w)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _safe_eligibility_advice(eligible_suppliers, budget, max_delivery_days):
+    """Build a factual response without model-generated recommendations."""
+    if not eligible_suppliers:
+        return (
+            "No supplier meets both requirements: a maximum total budget of "
+            f"RM {budget:.2f} and delivery within {max_delivery_days} days. "
+            "No supplier can be recommended under the current requirements."
+        )
+
+    lines = [
+        "Only the following quotes meet both requirements: "
+        f"a maximum total budget of RM {budget:.2f} and delivery within "
+        f"{max_delivery_days} days."
+    ]
+    for supplier in eligible_suppliers:
+        label = supplier.get("quote_id") or supplier["name"]
+        lines.append(
+            f"- {label}: RM {supplier['total_cost_rm']:.2f} total, "
+            f"{supplier['delivery_days']} days delivery."
+        )
+    return "\n".join(lines)
+
 
 # 2. Smart Supplier Recommendation
 def get_smart_advice(
@@ -30,10 +169,11 @@ def get_smart_advice(
     if not isinstance(suppliers, list) or not suppliers:
         raise ValueError("Please provide at least one supplier.")
 
-    if budget < 0:
+    if not isfinite(budget) or budget < 0:
         raise ValueError("Budget cannot be negative.")
+    bounded_decimal(budget, MAX_MONEY, "Budget")
 
-    if max_delivery_days < 0:
+    if not isfinite(max_delivery_days) or max_delivery_days < 0:
         raise ValueError("Delivery days cannot be negative.")
 
     allowed_priorities = {
@@ -80,17 +220,21 @@ def get_smart_advice(
                 f"Invalid numeric data for {supplier['name']}."
             ) from None
 
-        if min(price, shipping, delivery, distance) < 0:
+        if (
+            not all(isfinite(value) for value in (price, shipping, delivery, distance))
+            or min(price, shipping, delivery, distance) < 0
+        ):
             raise ValueError(
                 f"Negative values found for {supplier['name']}."
             )
 
-        total_cost = price + shipping
+        total_cost = checked_total(price, shipping)
 
         processed_suppliers.append({
+            **({"quote_id": supplier["quote_id"]} if "quote_id" in supplier else {}),
             "name": str(supplier["name"]),
-            "product_price_rm": round(price, 2),
-            "shipping_rm": round(shipping, 2),
+            "product_price_rm": price,
+            "shipping_rm": shipping,
             "total_cost_rm": round(total_cost, 2),
             "delivery_days": delivery,
             "distance_km": round(distance, 2),
@@ -145,6 +289,8 @@ def get_smart_advice(
         explain that the quote should be verified before purchase.
     13. Distinguish a warning from a confirmed error. An unusually
         high shipping fee is not automatically proof of fraud or error.
+    14. Reference quote_id when supplied. Supplier names are display labels
+        and may be shared by different quotes; do not merge their warnings.
 
     IMPORTANT
     Total cost = product price + shipping fee.
@@ -153,28 +299,54 @@ def get_smart_advice(
     Python warnings are validation signals and must not be ignored.
     """
 
+    if client is None:
+        raise AIConfigurationError("GEMINI_API_KEY is not configured.")
     try:
-        if client is None:
-            return (
-                "AI advice is unavailable because "
-                "GEMINI_API_KEY is not configured."
-            )
-
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                http_options=_gemini_http_options(),
+                automatic_continuation=False,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.LOW
+                ),
+            ),
         )
 
+        if any(
+            candidate.finish_reason == types.FinishReason.CONTINUATION
+            for candidate in (response.candidates or [])
+        ):
+            raise RuntimeError("Gemini returned incomplete advice.")
+
         if not response.text:
-            return "Gemini returned an empty response. Please try again."
+            raise RuntimeError("Gemini returned an empty response.")
+
+        # The model's text is not an authority on supplier eligibility. If it
+        # names any quote that fails either hard requirement, discard the
+        # entire response and return a deterministic summary of eligible quotes.
+        ineligible_suppliers = [
+            supplier
+            for supplier in processed_suppliers
+            if not supplier["within_budget"]
+            or not supplier["meets_delivery_requirement"]
+        ]
+        if any(
+            _mentions_supplier(response.text, supplier)
+            for supplier in ineligible_suppliers
+        ):
+            return _safe_eligibility_advice(
+                eligible_suppliers, budget, max_delivery_days,
+            )
 
         return response.text
 
     except Exception as error:
-        # Show the actual API error for debugging.
-        print("Gemini API error type:", type(error).__name__)
-        print("Gemini API error details:", str(error))
-        raise
+        # Only the bounded category/status escape. Never retain or expose the
+        # provider exception, message, response, submitted quote, or credential.
+        failure = classify_gemini_error(error)
+        raise failure from None
 
 
 # Test the AI Advisor

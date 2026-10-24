@@ -1,0 +1,610 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+security:
+  - SessionCookie: []
+tags:
+  - name: health
+    description: Health operations
+  - name: procurement
+    description: Procurement requests, supplier offers, approvals, invoices, and recommendations
+paths:
+  /auth/register:
+    post:
+      operationId: registerAccount
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountRegistration" }
+      responses:
+        "201":
+          description: Account created and session established
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountUser" }
+        "400": { $ref: "#/components/responses/AuthError" }
+        "403": { $ref: "#/components/responses/AuthError" }
+        "409": { $ref: "#/components/responses/AuthError" }
+        "429": { $ref: "#/components/responses/AuthError" }
+        "503": { $ref: "#/components/responses/AuthError" }
+  /auth/login:
+    post:
+      operationId: loginAccount
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountCredentials" }
+      responses:
+        "200":
+          description: Session established
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountUser" }
+        "400": { $ref: "#/components/responses/AuthError" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "403": { $ref: "#/components/responses/AuthError" }
+        "429": { $ref: "#/components/responses/AuthError" }
+        "503": { $ref: "#/components/responses/AuthError" }
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      responses:
+        "200":
+          description: Current signed-in account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountUser" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "503": { $ref: "#/components/responses/AuthError" }
+  /auth/logout:
+    post:
+      operationId: logoutAccount
+      tags: [auth]
+      responses:
+        "204": { description: Session invalidated }
+        "403": { $ref: "#/components/responses/AuthError" }
+        "503": { $ref: "#/components/responses/AuthError" }
+  /healthz:
+    get:
+      security: []
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /procurement/dashboard:
+    get:
+      operationId: getProcurementDashboard
+      tags: [procurement]
+      summary: Get procurement dashboard summary and recent activity
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementDashboard"
+  /procurement/requests:
+    get:
+      operationId: listProcurementRequests
+      tags: [procurement]
+      summary: List procurement requests
+      responses:
+        "200":
+          description: Procurement requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProcurementRequestSummary"
+    post:
+      operationId: createProcurementRequest
+      tags: [procurement]
+      summary: Create a procurement request and generate supplier offers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcurementRequestInput"
+      responses:
+        "201":
+          description: Created request with ranked offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementRequestDetail"
+  /procurement/requests/{requestId}:
+    get:
+      operationId: getProcurementRequest
+      tags: [procurement]
+      summary: Get a procurement request and its supplier offers
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementRequestDetail"
+        "404":
+          description: Request not found
+  /procurement/requests/{requestId}/advice:
+    post:
+      operationId: getProcurementAdvice
+      tags: [procurement]
+      summary: Validate stored illustrative offers and request private Python advice
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcurementAdviceInput"
+      responses:
+        "200":
+          description: Transient advice; no procurement data is modified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementAdvice"
+        "400":
+          description: Invalid request; authoritative offer fields are not accepted
+        "401":
+          description: Sign-in required
+        "404":
+          description: Request not found
+        "422":
+          description: Stored offers cannot be advised on, including non-MYR currency
+        "502":
+          description: Invalid private service response
+        "503":
+          description: Private service unavailable or not configured
+        "504":
+          description: Private service timed out
+  /procurement/requests/{requestId}/decision:
+    post:
+      operationId: decideProcurementRequest
+      tags: [procurement]
+      summary: Approve or reject a supplier offer
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcurementDecisionInput"
+      responses:
+        "200":
+          description: Updated request, with an invoice when approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementRequestDetail"
+        "400":
+          description: Invalid decision
+        "404":
+          description: Request or offer not found
+  /procurement/invoices:
+    get:
+      operationId: listProcurementInvoices
+      tags: [procurement]
+      summary: List signed electronic invoice records
+      responses:
+        "200":
+          description: Invoice records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProcurementInvoice"
+  /procurement/invoices/{invoiceId}/signature:
+    post:
+      operationId: signProcurementInvoice
+      tags: [procurement]
+      summary: Record a consenting account's typed electronic signature
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceSignatureInput" }
+      responses:
+        "200":
+          description: Persisted signed invoice
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcurementInvoice" }
+        "400": { description: Invalid name or missing consent }
+        "401": { description: Sign in required }
+        "404": { description: Invoice not found }
+        "409": { description: Invoice already signed }
+  /procurement/invoices/{invoiceId}/supplier-signature:
+    post:
+      operationId: signSupplierProcurementInvoice
+      tags: [procurement]
+      summary: Record an unverified supplier representative signature through a workspace account
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceSignatureInput" }
+      responses:
+        "200":
+          description: Invoice with immutable supplier entry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcurementInvoice" }
+        "400": { description: Invalid trimmed name or missing explicit authority and intent consent }
+        "401": { description: Sign in required }
+        "404": { description: Invoice not found }
+        "409": { description: Supplier entry already recorded }
+  /procurement/recommendations:
+    get:
+      operationId: getProcurementRecommendations
+      tags: [procurement]
+      summary: Generate recommendations from historical approval choices
+      responses:
+        "200":
+          description: AI-generated recommendations grounded in approval history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcurementRecommendations"
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: procureflow_session
+  responses:
+    AuthError:
+      description: Safe account or session error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AccountError" }
+  schemas:
+    AccountUser:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+    AccountCredentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 1, maxLength: 128 }
+    AccountRegistration:
+      type: object
+      required: [name, email, password, passwordConfirmation]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 12, maxLength: 128 }
+        passwordConfirmation: { type: string, minLength: 12, maxLength: 128 }
+    AccountError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    ProcurementAdviceInput:
+      type: object
+      additionalProperties: false
+      properties:
+        priority:
+          type: string
+          enum: [balanced, lowest_cost, fastest_delivery]
+          default: balanced
+    ProcurementAdviceWarning:
+      type: object
+      required: [offerId, type, severity, message]
+      properties:
+        offerId: { type: integer, minimum: 1 }
+        type:
+          type: string
+          enum: [TOTAL_COST_MISMATCH, INVALID_ROUTE, UNUSUALLY_HIGH_PRICE, UNUSUALLY_HIGH_SHIPPING]
+        severity: { type: string, enum: [high, medium] }
+        message: { type: string, maxLength: 2000 }
+    ProcurementAdviceSupplier:
+      type: object
+      required: [offerId, supplierName, productSubtotal, shippingFee, totalPrice, currency, deliveryDays, distanceKm, withinBudget, meetsDeliveryRequirement, anomalies]
+      properties:
+        offerId: { type: integer, minimum: 1 }
+        supplierName: { type: string }
+        productSubtotal: { type: number, minimum: 0 }
+        shippingFee: { type: number, minimum: 0 }
+        totalPrice: { type: number, minimum: 0 }
+        currency: { type: string, enum: [MYR] }
+        deliveryDays: { type: number, minimum: 0 }
+        distanceKm: { type: number, minimum: 0 }
+        withinBudget: { type: boolean }
+        meetsDeliveryRequirement: { type: boolean }
+        anomalies:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
+    ProcurementAdvice:
+      type: object
+      required: [requestId, generatedAt, source, maxDeliveryDays, deadlinePassed, deadlinePolicy, aiStatus, aiFailure, advice, suppliers, warnings]
+      properties:
+        requestId: { type: integer, minimum: 1 }
+        generatedAt: { type: string, format: date-time }
+        source: { type: string, enum: [illustrative_offers] }
+        maxDeliveryDays: { type: integer, minimum: 0 }
+        deadlinePassed: { type: boolean }
+        deadlinePolicy:
+          type: string
+          description: Matches existing illustrative scoring; ceiling of remaining 24-hour periods to UTC midnight of the stored delivery date.
+          enum: [stored_date_utc_midnight]
+        aiStatus: { type: string, enum: [success, unavailable, failed, skipped] }
+        aiFailure:
+          description: Bounded safe Gemini diagnostic only; no provider message, body, prompt or credential.
+          anyOf:
+            - $ref: "#/components/schemas/GeminiFailure"
+            - type: "null"
+        advice: { type: [string, "null"], maxLength: 20000 }
+        suppliers:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceSupplier" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/ProcurementAdviceWarning" }
+    GeminiFailure:
+      type: object
+      additionalProperties: false
+      required: [category, httpStatus]
+      properties:
+        category:
+          type: string
+          enum: [configuration, quota, permission, model, timeout, provider]
+        httpStatus:
+          description: Standard provider status retained only from a strict allowlist; null when not applicable.
+          type: [integer, "null"]
+          enum: [400, 401, 403, 404, 408, 409, 413, 415, 422, 429, 500, 501, 502, 503, 504, null]
+    ProcurementRequestInput:
+      type: object
+      required: [itemName, quantity, budgetAmount, currency, requiredDeliveryDate, deliveryLocation, requesterName]
+      properties:
+        itemName:
+          type: string
+          minLength: 2
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 1000000000
+        budgetAmount:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1000000000000
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        requiredDeliveryDate:
+          type: string
+          format: date
+        deliveryLocation:
+          type: string
+          minLength: 2
+        requesterName:
+          type: string
+          minLength: 2
+    ProcurementOffer:
+      type: object
+      required: [id, supplierName, supplierLocation, distanceKm, unitPrice, shippingFee, totalPrice, currency, deliveryDays, reliability, overallScore, priceScore, speedScore, proximityScore, reliabilityScore, rank]
+      properties:
+        id: { type: integer }
+        supplierName: { type: string }
+        supplierLocation: { type: string }
+        distanceKm: { type: number }
+        unitPrice: { type: number }
+        shippingFee: { type: number }
+        totalPrice: { type: number }
+        currency: { type: string }
+        deliveryDays: { type: integer }
+        reliability: { type: number }
+        overallScore: { type: number }
+        priceScore: { type: number }
+        speedScore: { type: number }
+        proximityScore: { type: number }
+        reliabilityScore: { type: number }
+        rank: { type: integer }
+    InvoiceSignatureInput:
+      type: object
+      required: [typedName, consent]
+      properties:
+        typedName: { type: string, minLength: 2, maxLength: 120 }
+        consent: { type: boolean, enum: [true] }
+    InvoiceElectronicSignature:
+      type: object
+      required: [typedName, accountId, accountName, signedAt, consentVersion, documentHash]
+      properties:
+        typedName: { type: string }
+        accountId: { type: integer }
+        accountName: { type: string }
+        signedAt: { type: string, format: date-time }
+        consentVersion: { type: string }
+        documentHash: { type: string }
+    InvoiceSupplierSignature:
+      type: object
+      description: Internal entry by a workspace account; supplier identity and authority are not verified
+      required: [typedName, supplierName, recordingAccountId, recordingAccountName, recordedAt, consentVersion, documentHash]
+      properties:
+        typedName: { type: string }
+        supplierName: { type: string }
+        recordingAccountId: { type: integer }
+        recordingAccountName: { type: string }
+        recordedAt: { type: string, format: date-time }
+        consentVersion: { type: string }
+        documentHash: { type: string }
+    ProcurementInvoice:
+      type: object
+      required: [id, reference, requestId, itemName, quantity, supplierName, buyerName, unitPrice, shippingFee, totalAmount, currency, issuedAt, signature, signatureType]
+      properties:
+        id: { type: integer }
+        reference: { type: string }
+        requestId: { type: integer }
+        itemName: { type: string }
+        quantity: { type: integer }
+        supplierName: { type: string }
+        buyerName: { type: string }
+        unitPrice: { type: number }
+        shippingFee: { type: number }
+        totalAmount: { type: number }
+        currency: { type: string }
+        issuedAt: { type: string, format: date-time }
+        signature: { type: string }
+        signatureType: { type: string }
+        electronicSignature:
+          $ref: "#/components/schemas/InvoiceElectronicSignature"
+        supplierSignature:
+          $ref: "#/components/schemas/InvoiceSupplierSignature"
+    ProcurementRequestSummary:
+      type: object
+      required: [id, itemName, quantity, budgetAmount, currency, requiredDeliveryDate, deliveryLocation, requesterName, status, offerCount, createdAt]
+      properties:
+        id: { type: integer }
+        itemName: { type: string }
+        quantity: { type: integer }
+        budgetAmount: { type: number }
+        currency: { type: string }
+        requiredDeliveryDate: { type: string, format: date }
+        deliveryLocation: { type: string }
+        requesterName: { type: string }
+        status:
+          type: string
+          enum: [open_for_quotes, pending_approval, approved, rejected]
+        offerCount: { type: integer }
+        selectedSupplier:
+          type: [string, "null"]
+        createdAt: { type: string, format: date-time }
+    ProcurementRequestDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProcurementRequestSummary"
+        - type: object
+          required: [offers, selectedOfferId, managerName, managerComment, invoice]
+          properties:
+            offers:
+              type: array
+              items:
+                $ref: "#/components/schemas/ProcurementOffer"
+            selectedOfferId:
+              type: [integer, "null"]
+            managerName:
+              type: [string, "null"]
+            managerComment:
+              type: [string, "null"]
+            invoice:
+              oneOf:
+                - $ref: "#/components/schemas/ProcurementInvoice"
+                - type: "null"
+    ProcurementDecisionInput:
+      type: object
+      required: [decision, managerName]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        offerId:
+          type: [integer, "null"]
+        managerName:
+          type: string
+          minLength: 2
+        comment:
+          type: string
+    ProcurementActivity:
+      type: object
+      required: [id, title, detail, time, kind]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        time: { type: string, format: date-time }
+        kind: { type: string }
+    ProcurementDashboard:
+      type: object
+      required: [activeRequests, awaitingApproval, approvedThisMonth, savingsAgainstBudget, recentActivity]
+      properties:
+        activeRequests: { type: integer }
+        awaitingApproval: { type: integer }
+        approvedThisMonth: { type: integer }
+        savingsAgainstBudget: { type: number }
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProcurementActivity"
+    ProcurementRecommendation:
+      type: object
+      required: [supplierName, approvals, reason]
+      properties:
+        supplierName: { type: string }
+        approvals: { type: integer }
+        reason: { type: string }
+    ProcurementRecommendations:
+      type: object
+      required: [summary, recommendations, generatedAt, historyCount]
+      properties:
+        summary: { type: string }
+        recommendations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProcurementRecommendation"
+        generatedAt: { type: string, format: date-time }
+        historyCount: { type: integer }
+

@@ -1,0 +1,10 @@
+- [SME procurement workflow](procurement-workflow.md) — Buying journey, shared account scope, and unverified manager identity; supplier and certified invoice setup remain separate.
+- [ProcureFlow visual direction](visual-direction.md) — Preserve the soft pastel stationery palette when adopting layouts.
+- [Preview runtime freshness](preview-runtime.md) — A preview can serve an older router after task merges; compare served code with source before changing valid routes.
+- [Imported backend boundaries](backend-boundaries.md) — Preserving backend history does not authorize public exposure, replacing live data, or reapplying experimental branches.
+- [Python runtime](python-runtime.md) — Full tooling and project-local package targets avoid the Nix pip wrapper's conflicting user-site installation settings.
+- [Bundled asset URL resolution](bundled-asset-urls.md) — Resolve relative chunk and stylesheet references from their emitting file before judging whether they stay under the preview base path.
+- [JavaScript responsive image paths](js-responsive-image-paths.md) — Keep extensionless srcset checks limited to static asset/media folders, excluding API paths that resemble image URLs.
+- [Temporary Vite preview servers](preview-asset-probes.md) — Stop pnpm-launched preview checks by process group so child servers cannot keep checks alive.
+- [Gemini request retries](gemini-request-retries.md) — Keep per-call retry limits explicit; the SDK can retry transient failures unless each request bounds attempts.
+- [Workspace package installs](workspace-package-installs.md) — The package-install helper rejects root pnpm dependencies; avoid undeclared transitive imports in root scripts.
