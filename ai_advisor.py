@@ -272,6 +272,9 @@ def get_smart_advice(
             config=types.GenerateContentConfig(
                 http_options=_gemini_http_options(),
                 automatic_continuation=False,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.LOW
+                ),
             ),
         )
 
