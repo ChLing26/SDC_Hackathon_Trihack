@@ -121,6 +121,48 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks existing extensionless unquoted object media resources", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+        <object data=/preview/media/object-image type=image/png></object>
+        <object data=/preview/media/object-audio type=audio/mpeg></object>
+        <object data=/preview/media/object-video type=video/mp4></object>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    for (const file of ["object-image", "object-audio", "object-video"]) {
+      writeFileSync(join(outputDirectory, "media", file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing extensionless unquoted object media but ignores unrelated objects", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+        <object data=/preview/media/missing-object-image type=image/png></object>
+        <object data=/preview/media/missing-object-audio type=audio/mpeg></object>
+        <object data=/preview/media/missing-object-video type=video/mp4></object>
+        <object data=/preview/media/ignored-document type=application/pdf></object>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /missing-object-image/);
+        assert.match(error.message, /missing-object-audio/);
+        assert.match(error.message, /missing-object-video/);
+        assert.doesNotMatch(error.message, /ignored-document/);
+        return true;
+      },
+    );
+  });
+
   it("checks comma-separated srcset and imagesrcset candidates while ignoring external and data URLs", () => {
     const { app, outputDirectory } = createApp({
       html: `

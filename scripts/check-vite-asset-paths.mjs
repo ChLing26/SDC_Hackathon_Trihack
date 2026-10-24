@@ -707,7 +707,8 @@ function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
 
   for (const tagMatch of html.matchAll(tagPattern)) {
     const element = tagMatch[1].toLowerCase();
-    for (const match of tagMatch[2].matchAll(attributePattern)) {
+    const tagAttributes = tagMatch[2];
+    for (const match of tagAttributes.matchAll(attributePattern)) {
       const attribute = match[1].toLowerCase();
       const decodedValue = decodeHtmlCharacterReferences(match[2]).value;
       const urls =
@@ -740,6 +741,28 @@ function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
         references.push({
           url,
           source: `${sourcePrefix ?? "index.html"}:${lineNumberAt(html, attributeOffset)} ${element}[${attribute}]`,
+          ...(resolveFrom ? { resolveFrom } : {}),
+        });
+      }
+    }
+
+    if (
+      element === "object" &&
+      isMediaResourceAttribute(element, "data", tagAttributes)
+    ) {
+      const unquotedDataPattern = /(?:^|\s)data\s*=\s*([^\s"'`=<>]+)/gi;
+      for (const match of tagAttributes.matchAll(unquotedDataPattern)) {
+        const url = decodeHtmlCharacterReferences(match[1]).value;
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) continue;
+
+        const attributeOffset =
+          tagMatch.index +
+          tagMatch[0].indexOf(tagAttributes) +
+          match.index +
+          match[0].lastIndexOf(match[1]);
+        references.push({
+          url,
+          source: `${sourcePrefix ?? "index.html"}:${lineNumberAt(html, attributeOffset)} ${element}[data]`,
           ...(resolveFrom ? { resolveFrom } : {}),
         });
       }
