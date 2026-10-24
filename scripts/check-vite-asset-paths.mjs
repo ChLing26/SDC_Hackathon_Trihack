@@ -672,19 +672,39 @@ function collectSVGReferences(svg, source) {
   const tagPattern = /<([a-z][a-z\d:-]*)\b([^>]*)>/gi;
   const hrefPattern =
     /(?:^|\s)((?:xlink:)?(?:href|src))\s*=\s*(["'])([\s\S]*?)\2/gi;
+  const attributePattern =
+    /(?:^|\s)([a-z][a-z\d:-]*)\s*=\s*(["'])([\s\S]*?)\2/gi;
 
   for (const tagMatch of svg.matchAll(tagPattern)) {
-    if (!resourceElements.test(tagMatch[1])) continue;
-    for (const match of tagMatch[2].matchAll(hrefPattern)) {
-      const attribute = match[1].toLowerCase();
-      const url = match[3].trim();
-      const resolvedUrl = decodeHtmlCharacterReferences(url).value;
-      if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
-      references.push({
-        url,
-        resolvedUrl,
-        source: `${source} ${tagMatch[1].toLowerCase()}[${attribute}]`,
-      });
+    const element = tagMatch[1].toLowerCase();
+    if (resourceElements.test(element)) {
+      for (const match of tagMatch[2].matchAll(hrefPattern)) {
+        const attribute = match[1].toLowerCase();
+        const url = match[3].trim();
+        const resolvedUrl = decodeHtmlCharacterReferences(url).value;
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
+        references.push({
+          url,
+          resolvedUrl,
+          source: `${source} ${element}[${attribute}]`,
+        });
+      }
+    }
+
+    for (const attributeMatch of tagMatch[2].matchAll(attributePattern)) {
+      const attribute = attributeMatch[1].toLowerCase();
+      if (attribute === "style") continue;
+      const value = decodeHtmlCharacterReferences(attributeMatch[3]).value;
+      for (const urlMatch of value.matchAll(cssUrlReferencePattern)) {
+        const url = urlMatch[1] ?? urlMatch[2] ?? urlMatch[3] ?? "";
+        const resolvedUrl = decodeCssEscapes(url);
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(resolvedUrl)) continue;
+        references.push({
+          url,
+          resolvedUrl,
+          source: `${source} ${element}[${attribute}]`,
+        });
+      }
     }
   }
 

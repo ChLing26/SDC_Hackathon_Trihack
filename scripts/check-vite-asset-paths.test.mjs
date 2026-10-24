@@ -1867,11 +1867,22 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       `<?xml-stylesheet type="text/css" href="./styles/site.css"?>
       <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <image href="./images/existing.webp"/>
+        <rect fill="url(./images/existing.webp#paint)"/>
+        <g
+          filter="url('./images/existing.webp#blur')"
+          mask="url(./images/existing.webp#mask)"
+          clip-path="url(./images/existing.webp#clip)"
+        />
         <image data-href="./images/ignored.webp"/>
         <image xlink:href="/preview/assets/images/absolute.webp"/>
         <image href="https://cdn.example.test/missing.webp"/>
         <image href="data:image/png;base64,AAAA"/>
         <use href="#local-symbol"/>
+        <rect
+          fill="url(#local-gradient)"
+          stroke="url(https://cdn.example.test/paint.svg#paint)"
+          filter="url(data:image/svg+xml;base64,AAAA)"
+        />
         <link rel="stylesheet" href="./styles/site.css"/>
         <style>
           @font-face { src: url("./fonts/site.woff2"); }
@@ -1886,6 +1897,86 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("reports missing local SVG presentation-attribute resources with their source element", () => {
+    const { app, outputDirectory } = createApp({
+      name: "SVGPaintMissing",
+      basePath: "/__mockup/",
+      html: '<script src="/__mockup/assets/app.js"></script><img src="/__mockup/assets/illustration.svg">',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(assetsDirectory, "illustration.svg"),
+      `<svg xmlns="http://www.w3.org/2000/svg">
+        <rect fill="url(./paint/missing-fill.svg#gradient)"/>
+        <path filter="url('./filters/missing-filter.svg#blur')" mask="url(./masks/missing-mask.svg#mask)" clip-path="url(./clips/missing-clip.svg#clip)"/>
+        <circle fill="url(#local-gradient)" stroke="url(https://cdn.example.test/missing.svg#paint)" filter="url(data:image/svg+xml;base64,AAAA)"/>
+      </svg>`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /SVGPaintMissing build output is missing files/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/paint\/missing-fill\.svg#gradient" in assets\/illustration\.svg rect\[fill\]/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/filters\/missing-filter\.svg#blur" in assets\/illustration\.svg path\[filter\]/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/masks\/missing-mask\.svg#mask" in assets\/illustration\.svg path\[mask\]/,
+        );
+        assert.match(
+          error.message,
+          /"\.\/clips\/missing-clip\.svg#clip" in assets\/illustration\.svg path\[clip-path\]/,
+        );
+        assert.doesNotMatch(
+          error.message,
+          /local-gradient|cdn\.example|data:image/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect preview prefixes in SVG presentation attributes with their source element", () => {
+    const { app, outputDirectory } = createApp({
+      name: "SVGPaintPrefix",
+      basePath: "/__mockup/",
+      html: '<script src="/__mockup/assets/app.js"></script><img src="/__mockup/assets/illustration.svg">',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(join(assetsDirectory, "app.js"), "");
+    writeFileSync(
+      join(assetsDirectory, "illustration.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(/assets/paint.svg#gradient)"/></svg>',
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /local assets do not use configured base path/,
+        );
+        assert.match(
+          error.message,
+          /"\/assets\/paint\.svg#gradient" in assets\/illustration\.svg rect\[fill\]/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("checks existing inline SVG resources against the configured base path and allows external and data URLs", () => {
     const { app, outputDirectory } = createApp({
       name: "InlineSVGExisting",
@@ -1893,6 +1984,7 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       html: `<script src="/__mockup/assets/app.js"></script>
         <svg xmlns="http://www.w3.org/2000/svg">
           <image href="./assets/images/existing.webp"/>
+          <rect fill="url(./assets/images/existing.webp#inline-paint)"/>
           <link rel="stylesheet" href="./assets/styles/site.css"/>
           <style>@font-face { src: url("./assets/fonts/site.woff2"); }</style>
           <image href="https://cdn.example.test/external.webp"/>
@@ -1925,6 +2017,7 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       html: `<script src="/__mockup/assets/app.js"></script>
         <svg xmlns="http://www.w3.org/2000/svg">
           <image href="./assets/images/missing.webp"/>
+          <rect fill="url(./assets/images/missing-paint.svg#inline-paint)"/>
           <link rel="stylesheet" href="./assets/styles/missing.css"/>
           <style>@font-face { src: url("./assets/fonts/missing.woff2"); }</style>
         </svg>`,
@@ -1940,6 +2033,10 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
           /InlineSVGMissing build output is missing files/,
         );
         assert.match(error.message, /"\.\/assets\/images\/missing\.webp"/);
+        assert.match(
+          error.message,
+          /"\.\/assets\/images\/missing-paint\.svg#inline-paint" in index\.html rect\[fill\]/,
+        );
         assert.match(error.message, /"\.\/assets\/styles\/missing\.css"/);
         assert.match(error.message, /"\.\/assets\/fonts\/missing\.woff2"/);
         return true;
