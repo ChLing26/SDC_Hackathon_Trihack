@@ -912,6 +912,72 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("checks media URLs assembled from static JavaScript values without treating routes as files", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const mediaDirectory = "/preview/media/";
+      const brandmarkName = "brandmark";
+      const brandmarkURL = mediaDirectory + brandmarkName;
+      const introURL = \`/preview/media/\${"intro"}\`;
+      const image = document.createElement("img");
+      image.src = brandmarkURL;
+      image.setAttribute("src", introURL);
+      const productRoute = "/preview/products/" + "item";
+      const mediaAPI = "/preview/api/media/" + "lookup";
+      window.location.href = productRoute;
+      fetch(mediaAPI);`,
+    );
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    writeFileSync(join(outputDirectory, "media", "brandmark"), "");
+    writeFileSync(join(outputDirectory, "media", "intro"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports a missing media file assembled from JavaScript constants", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const mediaDirectory = "/preview/assets/";
+      const missingName = "missing-cover.webp";
+      const coverURL = mediaDirectory + missingName;
+      const image = document.createElement("img");
+      image.src = coverURL;
+      const missingRouteName = "missing-route.webp";
+      const productRoute = \`/preview/products/\${missingRouteName}\`;
+      const missingAPIName = "missing-api.webp";
+      const mediaAPI = "/preview/api/media/" + missingAPIName;
+      window.location.href = productRoute;
+      fetch(mediaAPI);`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-cover\.webp" in assets\/app\.js/,
+        );
+        assert.doesNotMatch(
+          error.message,
+          /missing-route|missing-api|products\/|api\/media/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("ignores missing asset paths in JavaScript comments without treating string contents as comments", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script>',

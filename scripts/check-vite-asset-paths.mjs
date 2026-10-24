@@ -240,6 +240,7 @@ function collectJavaScriptStringAssetReferences(source) {
   const ranges = [];
   const stringPattern =
     /(["'\x60])((?:\\[\s\S]|(?!\1)[^\\])*)\1/g;
+  const staticStringBindings = collectStaticJavaScriptStringBindings(source);
 
   for (const literal of source.matchAll(stringPattern)) {
     // An interpolated template can contain runtime values, so keep its
@@ -275,7 +276,310 @@ function collectJavaScriptStringAssetReferences(source) {
     }
   }
 
-  return { references, ranges };
+  const constructedReferences = collectConstructedJavaScriptMediaReferences(
+    source,
+    staticStringBindings,
+  );
+  const constructedStringRanges = [
+    ...constructedReferences.flatMap(({ literalRanges }) => literalRanges),
+    ...collectNonMediaConstructedStringRanges(source, staticStringBindings),
+  ];
+  references.push(...constructedReferences);
+
+  return {
+    references: references.filter(
+      (reference) =>
+        !constructedStringRanges.some(
+          ({ start, end }) => reference.index >= start && reference.index < end,
+        ),
+    ),
+    ranges,
+  };
+}
+
+function collectStaticJavaScriptStringBindings(source) {
+  const bindings = new Map();
+  const declarationNames = new Set();
+  const codeMask = maskJavaScriptLiterals(source);
+  const declarationPattern = /\bconst\s+([$A-Z_a-z][$\w]*)\s*=/g;
+
+  for (const declaration of codeMask.matchAll(declarationPattern)) {
+    const name = declaration[1];
+    if (declarationNames.has(name)) {
+      bindings.delete(name);
+      continue;
+    }
+    declarationNames.add(name);
+
+    let expressionStart = declaration.index + declaration[0].length;
+    while (
+      /\s/.test(source[expressionStart] ?? "") &&
+      expressionStart < source.length
+    ) {
+      expressionStart += 1;
+    }
+    const expression = parseStaticJavaScriptStringExpression(
+      source,
+      expressionStart,
+      bindings,
+    );
+    if (
+      !expression ||
+      !isStaticJavaScriptExpressionBoundary(source, expression.end)
+    ) {
+      continue;
+    }
+    bindings.set(name, expression);
+  }
+
+  return bindings;
+}
+
+function collectConstructedJavaScriptMediaReferences(source, bindings) {
+  const references = [];
+  const codeMask = maskJavaScriptLiterals(source);
+  const assignmentPattern =
+    /(?:\.\s*(?:src|poster)\s*=\s*|\.\s*setAttribute\s*\(\s*["'](?:src|poster)["']\s*,\s*|\b(?:src|poster)\s*:\s*)/gi;
+
+  for (const assignment of source.matchAll(assignmentPattern)) {
+    if (codeMask[assignment.index] === " ") continue;
+
+    const expressionStart = assignment.index + assignment[0].length;
+    const expression = parseStaticJavaScriptStringExpression(
+      source,
+      expressionStart,
+      bindings,
+    );
+    if (
+      !expression ||
+      !isStaticJavaScriptExpressionBoundary(source, expression.end) ||
+      !isConstructedMediaURL(expression.value)
+    ) {
+      continue;
+    }
+
+    references.push({
+      url: expression.value,
+      index: assignment.index,
+      literalRanges: expression.literalRanges,
+    });
+  }
+
+  return references;
+}
+
+function collectNonMediaConstructedStringRanges(source, bindings) {
+  const ranges = [];
+
+  for (const binding of bindings.values()) {
+    if (binding.literalRanges.length > 1 && isJavaScriptAPIURL(binding.value)) {
+      ranges.push(...binding.literalRanges);
+    }
+  }
+
+  const codeMask = maskJavaScriptLiterals(source);
+  const nonMediaURLPatterns = [
+    /\b(?:window\.)?location(?:\.(?:href|pathname))?\s*=\s*/gi,
+    /\b(?:window\.)?location\.(?:assign|replace)\s*\(\s*/gi,
+    /\b(?:window\.)?open\s*\(\s*/gi,
+    /\b(?:router\.)?(?:navigate|push|replace|redirect)\s*\(\s*/gi,
+    /\bhistory\.(?:pushState|replaceState)\s*\(\s*[^,]*,\s*[^,]*,\s*/gi,
+    /\bfetch\s*\(\s*/gi,
+    /\baxios\.(?:get|post|put|patch|delete)\s*\(\s*/gi,
+  ];
+
+  for (const pattern of nonMediaURLPatterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (codeMask[match.index] === " ") continue;
+      const expression = parseStaticJavaScriptStringExpression(
+        source,
+        match.index + match[0].length,
+        bindings,
+      );
+      if (
+        !expression ||
+        !isStaticJavaScriptExpressionBoundary(source, expression.end) ||
+        expression.literalRanges.length < 2
+      ) {
+        continue;
+      }
+      if (
+        isJavaScriptAPIURL(expression.value) ||
+        (/^(?:\/|\.{1,2}\/)/.test(expression.value) &&
+          !isConstructedMediaURL(expression.value))
+      ) {
+        ranges.push(...expression.literalRanges);
+      }
+    }
+  }
+
+  return ranges;
+}
+
+function parseStaticJavaScriptStringExpression(source, start, bindings) {
+  let position = start;
+  const skipWhitespace = () => {
+    while (/\s/.test(source[position] ?? "") && position < source.length) {
+      position += 1;
+    }
+  };
+
+  const parsePrimary = () => {
+    skipWhitespace();
+    const character = source[position];
+
+    if (character === "'" || character === '"') {
+      const literal = parseStaticJavaScriptString(source, position);
+      if (!literal) return null;
+      const start = position;
+      position = literal.end;
+      return {
+        value: literal.value,
+        literalRanges: [{ start, end: position }],
+      };
+    }
+
+    if (character === "`") {
+      const literal = parseStaticJavaScriptTemplate(source, position, bindings);
+      if (!literal) return null;
+      position = literal.end;
+      return literal;
+    }
+
+    if (character === "(") {
+      position += 1;
+      const nested = parseExpression();
+      if (nested === null) return null;
+      skipWhitespace();
+      if (source[position] !== ")") return null;
+      position += 1;
+      return nested;
+    }
+
+    const identifier = source.slice(position).match(/^[$A-Z_a-z][$\w]*/)?.[0];
+    if (!identifier || !bindings.has(identifier)) return null;
+    position += identifier.length;
+    const binding = bindings.get(identifier);
+    return {
+      value: binding.value,
+      literalRanges: binding.literalRanges,
+    };
+  };
+
+  const parseExpression = () => {
+    let result = parsePrimary();
+    if (result === null) return null;
+
+    while (true) {
+      skipWhitespace();
+      if (source[position] !== "+") return result;
+      position += 1;
+      const next = parsePrimary();
+      if (next === null) return null;
+      result = {
+        value: result.value + next.value,
+        literalRanges: [...result.literalRanges, ...next.literalRanges],
+      };
+    }
+  };
+
+  const expression = parseExpression();
+  return expression === null ? null : { ...expression, end: position };
+}
+
+function parseStaticJavaScriptTemplate(source, start, bindings) {
+  let position = start + 1;
+  let chunkStart = position;
+  let value = "";
+  const literalRanges = [];
+
+  while (position < source.length) {
+    if (source[position] === "\\") {
+      position += 2;
+      continue;
+    }
+    if (source[position] === "`") {
+      value += decodeJavaScriptString(source.slice(chunkStart, position));
+      return {
+        value,
+        end: position + 1,
+        literalRanges: [{ start, end: position + 1 }, ...literalRanges],
+      };
+    }
+    if (source[position] === "$" && source[position + 1] === "{") {
+      value += decodeJavaScriptString(source.slice(chunkStart, position));
+      const expression = parseStaticJavaScriptStringExpression(
+        source,
+        position + 2,
+        bindings,
+      );
+      if (!expression) return null;
+      position = expression.end;
+      while (/\s/.test(source[position] ?? "") && position < source.length) {
+        position += 1;
+      }
+      if (source[position] !== "}") return null;
+      value += expression.value;
+      literalRanges.push(...expression.literalRanges);
+      position += 1;
+      chunkStart = position;
+      continue;
+    }
+    position += 1;
+  }
+
+  return null;
+}
+
+function isJavaScriptAPIURL(url) {
+  try {
+    return /(?:^|\/)api(?:\/|$)/i.test(
+      new URL(url, "http://preview.local/").pathname,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isStaticJavaScriptExpressionBoundary(source, end) {
+  let position = end;
+  let crossedLineBreak = false;
+  while (/\s/.test(source[position] ?? "") && position < source.length) {
+    if (source[position] === "\n" || source[position] === "\r") {
+      crossedLineBreak = true;
+    }
+    position += 1;
+  }
+
+  if (position >= source.length || /[;,)}\]]/.test(source[position])) {
+    return true;
+  }
+  return crossedLineBreak && !/[.+\-*/%&|?=<>]/.test(source[position]);
+}
+
+function isConstructedMediaURL(url) {
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(url)) return false;
+
+  try {
+    const pathname = new URL(url, "http://preview.local/").pathname;
+    if (/(?:^|\/)api(?:\/|$)/i.test(pathname)) return false;
+    if (
+      !/(?:^|\/)(?:assets|media|images?|img|audio|video|icons?)(?:\/|$)/i.test(
+        pathname,
+      )
+    ) {
+      return false;
+    }
+
+    const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
+    if (!filename) return false;
+    if (!filename.includes(".")) return true;
+    return /\.(?:png|jpe?g|gif|svg|webp|avif|ico|mp3|mp4|m4a|m4v|mov|webm|wav|ogg|oga|opus|aac|flac|aiff?|avi|mpeg|mpg|3gp)$/i.test(
+      filename,
+    );
+  } catch {
+    return false;
+  }
 }
 
 function collectBuiltSVGReferences(outputDirectory) {
