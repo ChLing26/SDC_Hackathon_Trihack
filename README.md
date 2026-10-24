@@ -23,7 +23,7 @@
 | ----------------- | ----------------------------------------------------------- |
 | GitHub Repository | https://github.com/ChLing26/SDC_Hackathon_Trihack/tree/main |
 | Live Demo         | https://tri-hack-sdc-hackaton.replit.app                    |
-| Slide Deck        | https://example.com/slides                     |
+| Slide Deck        | https://xmueducn-my.sharepoint.com/:p:/g/personal/ege2509040_xmu_edu_my/IQBANk0oL7rsT7IEZ72MeEJ8AZAPgTKJqajYZKEhRfbcYec?e=LomVP0 |
 | Demo Video        | https://example.com/demo-video                 |
 
 ---
@@ -184,13 +184,13 @@ python -m unittest discover tests
 ## Submission Checklist
 
 - [/] Team name, domain (Domain 1 / Domain 2) and SDG track filled in
-- [ ] Slide deck link added
-- [ ] Demo video link added
+- [/] Slide deck link added
+- [/] Demo video link added
 - [/] Replit used, with proof of use in `submission/`
 - [/] Preliminary submission completed (`SDC2026_TeamName_Preliminary.pdf`)
 - [/] Technology declaration completed (`SDC2026_TeamName_TechDeclaration.pdf`)
 - [/] Submission files renamed with your team name (replace `TeamName`)
-- [/] "How to Run" steps verified
+- [ ] "How to Run" steps verified
 - [ ] No API keys or secrets committed to the repository
 
 ## License
