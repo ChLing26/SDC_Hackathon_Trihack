@@ -77,6 +77,14 @@ function collectBundledScriptReferences(outputDirectory) {
   const dynamicImportPattern = /\bimport\s*\(\s*(["'\x60])([^"'\x60]+)\1\s*\)/g;
   const workerPattern =
     /\bnew\s+(?:Worker|SharedWorker)\s*\(\s*(?:new\s+URL\s*\(\s*)?(["'\x60])([^"'\x60]+)\1/g;
+  const staticValuePattern =
+    /\b(?:const|let|var)\s+([\w$]+)\s*=\s*(["'\x60])([^"'\x60]+)\2\s*;?/g;
+  const urlValuePattern =
+    /\b(?:const|let|var)\s+([\w$]+)\s*=\s*new\s+URL\s*\(\s*(?:(["'\x60])([^"'\x60]+)\2|([\w$]+))\s*,\s*import\.meta\.url\s*\)\s*(?:\.href)?\s*;?/g;
+  const constructedWorkerPattern =
+    /\bnew\s+(?:Worker|SharedWorker)\s*\(\s*new\s+URL\s*\(\s*(?:(["'\x60])([^"'\x60]+)\1|([\w$]+))\s*,\s*import\.meta\.url\s*\)\s*(?:\.href)?\s*[,)]/g;
+  const workerVariablePattern =
+    /\bnew\s+(?:Worker|SharedWorker)\s*\(\s*([\w$]+)(?:\.href)?\s*[,)]/g;
 
   while (pendingDirectories.length > 0) {
     const directory = pendingDirectories.pop();
@@ -91,6 +99,17 @@ function collectBundledScriptReferences(outputDirectory) {
 
       const source = relative(outputDirectory, entryPath).split(sep).join("/");
       const content = readFileSync(entryPath, "utf8");
+      const staticValues = new Map();
+      for (const match of content.matchAll(staticValuePattern)) {
+        if (match[2] === "`" && match[3].includes("${")) continue;
+        staticValues.set(match[1], match[3]);
+      }
+      for (const match of content.matchAll(urlValuePattern)) {
+        if (match[2] === "`" && match[3].includes("${")) continue;
+        const specifier = match[3] ?? staticValues.get(match[4]);
+        if (specifier !== undefined) staticValues.set(match[1], specifier);
+      }
+
       for (const match of content.matchAll(dynamicImportPattern)) {
         const specifier = match[2];
         if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(specifier)) continue;
@@ -104,17 +123,30 @@ function collectBundledScriptReferences(outputDirectory) {
         references.push({ source, specifier, isWorker: false });
       }
 
-      for (const match of content.matchAll(workerPattern)) {
-        const specifier = match[2];
-        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(specifier)) continue;
+      const addWorkerReference = (specifier) => {
+        if (!specifier || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(specifier)) {
+          return;
+        }
         let pathname;
         try {
           pathname = new URL(specifier, "http://preview.local/").pathname;
         } catch {
-          continue;
+          return;
         }
-        if (!/\.(?:m?js)$/i.test(pathname)) continue;
+        if (!/\.(?:m?js)$/i.test(pathname)) return;
         references.push({ source, specifier, isWorker: true });
+      };
+
+      for (const match of content.matchAll(workerPattern)) {
+        if (match[1] === "`" && match[2].includes("${")) continue;
+        addWorkerReference(match[2]);
+      }
+      for (const match of content.matchAll(constructedWorkerPattern)) {
+        if (match[1] === "`" && match[2].includes("${")) continue;
+        addWorkerReference(match[2] ?? staticValues.get(match[3]));
+      }
+      for (const match of content.matchAll(workerVariablePattern)) {
+        addWorkerReference(staticValues.get(match[1]));
       }
     }
   }

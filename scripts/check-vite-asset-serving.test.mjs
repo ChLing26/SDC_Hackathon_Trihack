@@ -254,8 +254,12 @@ new URL("./feature.wasm", import.meta.url);`,
     writeFileSync(
       join(tempRoot, app.indexPath.replace("index.html", "assets/app.js")),
       `import("./features/lazy-feature.js");
-new Worker(new URL("./features/feature-worker.js", import.meta.url), { type: "module" });
-new SharedWorker("/__mockup/assets/shared-worker.js");`,
+const featureWorkerPath = "./features/feature-worker.js";
+const featureWorkerUrl = new URL(featureWorkerPath, import.meta.url);
+const sharedWorkerPath = "/__mockup/assets/shared-worker.js";
+const sharedWorkerUrl = new URL(sharedWorkerPath, import.meta.url).href;
+new Worker(featureWorkerUrl, { type: "module" });
+new SharedWorker(sharedWorkerUrl);`,
     );
     writeFileSync(
       join(tempRoot, "dist", "assets", "features", "feature-worker.js"),
@@ -295,6 +299,52 @@ new SharedWorker("/__mockup/assets/shared-worker.js");`,
 
     assert.ok(requests.includes("/__mockup/assets/features/feature-worker.js"));
     assert.ok(requests.includes("/__mockup/assets/shared-worker.js"));
+  });
+
+  it("ignores external, blob-backed, and unresolved runtime worker URLs", async () => {
+    const app = makeBuiltApp();
+    writeFileSync(
+      join(tempRoot, app.indexPath.replace("index.html", "assets/app.js")),
+      `const remoteWorkerUrl = "https://cdn.example/worker.js";
+const blobWorkerUrl = URL.createObjectURL(new Blob());
+const runtimeWorkerName = getWorkerName();
+new Worker(remoteWorkerUrl);
+new Worker(blobWorkerUrl);
+new Worker(new URL(runtimeWorkerName, import.meta.url));
+new Worker(new URL(\`./workers/\${runtimeWorkerName}.js\`, import.meta.url));`,
+    );
+    const requests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      requests.push(url.pathname);
+      if (
+        url.pathname === "/__mockup/" ||
+        url.pathname === "/__mockup/__asset-check__/nested/"
+      ) {
+        return response("<div id='root'></div>", "text/html", 200, url.href);
+      }
+      if (url.pathname.endsWith(".js"))
+        return response("export {}", "text/javascript");
+      if (url.pathname.endsWith(".css")) return response("body {}", "text/css");
+      if (url.pathname.endsWith(".svg"))
+        return response("<svg/>", "image/svg+xml");
+      return response("missing", "text/html", 404);
+    };
+
+    await assert.doesNotReject(() =>
+      checkServedAssets(app, {
+        cwd: tempRoot,
+        baseUrl: "http://preview.local",
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+    );
+
+    assert.equal(
+      requests.some((path) => path.includes("worker.js")),
+      false,
+    );
   });
 
   it("rejects app-shell HTML returned instead of a web worker script", async () => {
