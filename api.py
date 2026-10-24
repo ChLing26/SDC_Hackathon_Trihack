@@ -250,7 +250,10 @@ def supplier_advice(request: AdviceRequest):
             ai_status = "failed"
             ai_failure = {"category": error.category, "http_status": error.http_status}
             advice = (
+                "Gemini AI is temporarily unavailable. Please try again later. "
+                if error.http_status == 503 else
                 "AI advice is temporarily unavailable. "
+            ) + (
                 "Supplier results and anomaly warnings "
                 "are still available."
             )

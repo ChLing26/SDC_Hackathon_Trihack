@@ -75,6 +75,8 @@ def classify_gemini_error(error: Exception) -> GeminiProviderError:
 
     if "timeout" in exception_name or code in (408, 504) or status_name == "DEADLINE_EXCEEDED":
         return GeminiProviderError("timeout", provider_status or 504)
+    if code == 503 or status_name == "UNAVAILABLE":
+        return GeminiProviderError("provider", provider_status or 503)
     if code == 429 or status_name in {"RESOURCE_EXHAUSTED", "TOO_MANY_REQUESTS"}:
         return GeminiProviderError("quota", provider_status or 429)
     if code in (401, 403) or status_name in {"UNAUTHENTICATED", "PERMISSION_DENIED"}:

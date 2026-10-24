@@ -138,6 +138,117 @@ class ProviderChecks(unittest.TestCase):
         finally:
             sdk_client.close()
 
+    def test_structured_unavailable_status_is_classified_as_503(self):
+        failure = ai_advisor.classify_gemini_error(
+            SimpleNamespace(code=None, status="UNAVAILABLE"),
+        )
+        self.assertEqual((failure.category, failure.http_status), ("provider", 503))
+
+    def test_advice_api_survives_provider_failures_and_recovers(self):
+        from fastapi.testclient import TestClient
+        from api import app
+
+        token = "offline-fixture-private-service-token"
+        headers = {"Authorization": "Bearer " + token}
+        private_detail = "fixture-private-provider-detail"
+        payload = {
+            "suppliers": [dict(
+                SUPPLIERS[0], quote_id="fixture", total_cost_rm=999,
+            )],
+            "budget": 30, "max_delivery_days": 3,
+        }
+        scenarios = (
+            ("unavailable", 503, "provider"),
+            ("deadline", 504, "timeout"),
+            ("transport_timeout", 504, "timeout"),
+            ("unexpected", 502, "provider"),
+        )
+        for scenario, failure_status, category in scenarios:
+            with self.subTest(scenario=scenario):
+                requests = []
+
+                def provider(request):
+                    requests.append(request)
+                    if len(requests) == 1:
+                        if scenario == "transport_timeout":
+                            raise httpx.ReadTimeout(private_detail, request=request)
+                        if scenario == "unexpected":
+                            raise RuntimeError(private_detail)
+                        return httpx.Response(
+                            failure_status,
+                            json={"error": {
+                                "code": failure_status,
+                                "status": (
+                                    "UNAVAILABLE" if failure_status == 503
+                                    else "DEADLINE_EXCEEDED"
+                                ),
+                                "message": private_detail,
+                            }},
+                        )
+                    return httpx.Response(200, json={
+                        "candidates": [{
+                            "content": {
+                                "role": "model",
+                                "parts": [{"text": "Fixture meets both requirements."}],
+                            },
+                            "finishReason": "STOP",
+                        }],
+                    })
+
+                sdk_client = genai.Client(
+                    api_key="offline-test-key",
+                    http_options=types.HttpOptions(
+                        client_args={"transport": httpx.MockTransport(provider)},
+                    ),
+                )
+                try:
+                    with (
+                        patch.object(ai_advisor, "client", sdk_client),
+                        patch(
+                            "src.backend_security.configured_service_token",
+                            return_value=token,
+                        ),
+                        TestClient(app) as client,
+                    ):
+                        response = client.post(
+                            "/supplier-advice", headers=headers, json=payload,
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        result = response.json()
+                        self.assertEqual(result["ai_status"], "failed")
+                        self.assertEqual(result["ai_failure"], {
+                            "category": category, "http_status": failure_status,
+                        })
+                        self.assertEqual(len(requests), 1)
+                        self.assertNotIn(private_detail, response.text)
+                        self.assertNotIn(token, response.text)
+                        supplier = result["suppliers"][0]
+                        self.assertEqual(supplier["total_cost_rm"], 25)
+                        self.assertTrue(supplier["within_budget"])
+                        self.assertTrue(supplier["meets_delivery_requirement"])
+                        self.assertTrue(supplier["anomalies"])
+                        self.assertGreater(result["warning_count"], 0)
+                        if failure_status == 503:
+                            self.assertIn(
+                                "Gemini AI is temporarily unavailable",
+                                result["ai_advice"],
+                            )
+                            self.assertIn("try again later", result["ai_advice"])
+
+                        health = client.get("/", headers=headers)
+                        self.assertEqual(health.status_code, 200)
+                        self.assertEqual(health.json()["status"], "running")
+                        self.assertEqual(len(requests), 1)
+                        recovered = client.post(
+                            "/supplier-advice", headers=headers, json=payload,
+                        )
+                        self.assertEqual(recovered.status_code, 200)
+                        self.assertEqual(recovered.json()["ai_status"], "success")
+                        self.assertIsNone(recovered.json()["ai_failure"])
+                        self.assertEqual(len(requests), 2)
+                finally:
+                    sdk_client.close()
+
     def test_continuation_response_does_not_trigger_another_provider_request(self):
         requests = []
 
