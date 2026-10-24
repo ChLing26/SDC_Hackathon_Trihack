@@ -177,7 +177,7 @@ python -m unittest discover tests
 | Tan Xin Hui | Frontend /AI        | tanhuiling59(https://github.com/tanhuiling59)   |
 | Tan Hui Ling| Frontend            | xinhuitan0731（https://github.com/xinhuitan0731)|
 | Chong Ling  | Backend             | ChLing26(https://github.com/ChLing26)           |
-| Ong Yi Soong| AI / RunPod         | SlokeNg(https://github.com/SlokeOng)            |
+| Ong Yi Soong| Pitch & Media Lead  | SlokeNg(https://github.com/SlokeOng)            |
 
 ---
 
