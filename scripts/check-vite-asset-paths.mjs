@@ -144,7 +144,10 @@ function collectBuiltCodeReferences(outputDirectory, basePath) {
 
       if (isStylesheet) {
         for (const match of content.matchAll(cssUrlReferencePattern)) {
-          const reference = createCssURLReference(match, source);
+          const reference = createCssURLReference(
+            match,
+            `${source}:${lineNumberAt(content, match.index)}`,
+          );
           if (!reference || seenUrls.has(reference.url)) continue;
           seenUrls.add(reference.url);
           references.push(reference);

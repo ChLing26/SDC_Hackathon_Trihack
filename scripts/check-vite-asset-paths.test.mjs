@@ -1231,7 +1231,7 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
-  it("reports missing image and font URLs with their nested stylesheet source", () => {
+  it("reports missing image and font URLs with their nested stylesheet lines", () => {
     const { app, outputDirectory } = createApp({
       name: "Nested CSS Missing",
       basePath: "/__mockup/",
@@ -1243,7 +1243,12 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     writeFileSync(join(assetsDirectory, "styles.css"), '@import url("./css/themes/dark.css");');
     writeFileSync(
       join(nestedStylesheetDirectory, "dark.css"),
-      '.hero { background-image: url("../images/missing-hero.webp"); } @font-face { src: url("../fonts/missing-display.woff2"); }',
+      `.hero {
+  background-image: url("../images/missing-hero.webp");
+}
+@font-face {
+  src: url("../fonts/missing-display.woff2");
+}`,
     );
     writeFileSync(join(assetsDirectory, "app.js"), "");
 
@@ -1252,11 +1257,11 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
       (error) => {
         assert.match(
           error.message,
-          /"\.\.\/images\/missing-hero\.webp" in assets\/css\/themes\/dark\.css/,
+          /"\.\.\/images\/missing-hero\.webp" in assets\/css\/themes\/dark\.css:2/,
         );
         assert.match(
           error.message,
-          /"\.\.\/fonts\/missing-display\.woff2" in assets\/css\/themes\/dark\.css/,
+          /"\.\.\/fonts\/missing-display\.woff2" in assets\/css\/themes\/dark\.css:5/,
         );
         return true;
       },
