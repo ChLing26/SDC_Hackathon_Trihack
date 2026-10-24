@@ -766,7 +766,7 @@ function collectHTMLReferences(html, sourcePrefix, resolveFrom) {
     const tagAttributes = tagMatch[2];
     for (const match of tagAttributes.matchAll(attributePattern)) {
       const attribute = match[1].toLowerCase();
-      const rawValue = match[2] ?? match[3];
+      const rawValue = match[2] ?? match[3] ?? match[4];
       if (rawValue === undefined) continue;
       if (!/^(?:src|href|srcset|imagesrcset|poster|data)$/i.test(attribute)) {
         continue;

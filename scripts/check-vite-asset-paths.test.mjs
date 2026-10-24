@@ -140,6 +140,105 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks unquoted resource attributes and ignores external and data URLs", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src=/preview/assets/app.js></script>
+<link rel=stylesheet href=/preview/assets/site.css>
+<img src=/preview/assets/photo.webp srcset=/preview/assets/photo-small.webp>
+<link rel=preload as=image imagesrcset=/preview/assets/preload.webp>
+<video poster=/preview/media/poster></video>
+<img src=https://cdn.example.test/external.webp srcset=data:image/png;base64,AAAA>
+<link href=data:text/css,body%7B%7D>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "media"), { recursive: true });
+    for (const file of [
+      "app.js",
+      "site.css",
+      "photo.webp",
+      "photo-small.webp",
+      "preload.webp",
+    ]) {
+      writeFileSync(join(outputDirectory, "assets", file), "");
+    }
+    writeFileSync(join(outputDirectory, "media", "poster"), "");
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing unquoted HTML resources with their element, attribute, and line", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src=/preview/assets/app.js></script>
+<img src=/preview/assets/missing-image.webp>
+<link rel=stylesheet href=/preview/assets/missing-style.css>
+<img srcset=/preview/assets/missing-srcset.webp>
+<link rel=preload as=image imagesrcset=/preview/assets/missing-imagesrcset.webp>
+<video poster=/preview/media/missing-poster></video>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        for (const [url, line, element, attribute] of [
+          ["/preview/assets/missing-image.webp", 2, "img", "src"],
+          ["/preview/assets/missing-style.css", 3, "link", "href"],
+          ["/preview/assets/missing-srcset.webp", 4, "img", "srcset"],
+          [
+            "/preview/assets/missing-imagesrcset.webp",
+            5,
+            "link",
+            "imagesrcset",
+          ],
+          ["/preview/media/missing-poster", 6, "video", "poster"],
+        ]) {
+          assert.ok(
+            error.message.includes(
+              `"${url}" in index.html:${line} ${element}[${attribute}]`,
+            ),
+          );
+        }
+        return true;
+      },
+    );
+  });
+
+  it("reports wrong preview prefixes in unquoted HTML resource attributes with their source location", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src=/preview/assets/app.js></script>
+<img src=/assets/wrong-image-prefix.webp>
+<link rel=stylesheet href=/assets/wrong-style-prefix.css>
+<img srcset=/assets/wrong-srcset-prefix.webp>
+<link rel=preload as=image imagesrcset=/assets/wrong-imagesrcset-prefix.webp>
+<video poster=/media/wrong-poster-prefix></video>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        for (const [url, line, element, attribute] of [
+          ["/assets/wrong-image-prefix.webp", 2, "img", "src"],
+          ["/assets/wrong-style-prefix.css", 3, "link", "href"],
+          ["/assets/wrong-srcset-prefix.webp", 4, "img", "srcset"],
+          ["/assets/wrong-imagesrcset-prefix.webp", 5, "link", "imagesrcset"],
+          ["/media/wrong-poster-prefix", 6, "video", "poster"],
+        ]) {
+          assert.ok(
+            error.message.includes(
+              `"${url}" in index.html:${line} ${element}[${attribute}]`,
+            ),
+          );
+        }
+        return true;
+      },
+    );
+  });
+
   it("reports missing extensionless unquoted object media but ignores unrelated objects", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>
