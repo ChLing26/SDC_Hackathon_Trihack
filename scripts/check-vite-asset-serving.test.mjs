@@ -1,13 +1,160 @@
 import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createServer } from "node:net";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { after, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+import { after, before, describe, it } from "node:test";
 
 import { checkServedAssets } from "./check-vite-asset-serving.mjs";
 
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const viteCli = join(
+  repositoryRoot,
+  "artifacts",
+  "mockup-sandbox",
+  "node_modules",
+  ".bin",
+  "vite",
+);
 const tempRoot = mkdtempSync(join(tmpdir(), "vite-asset-serving-tests-"));
 after(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+async function getAvailablePort() {
+  const server = createServer();
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const { port } = server.address();
+  await new Promise((resolveClose, reject) => {
+    server.close((error) => (error ? reject(error) : resolveClose()));
+  });
+  return port;
+}
+
+function writeViteWorkerFixture(fixtureRoot) {
+  mkdirSync(join(fixtureRoot, "src"), { recursive: true });
+  mkdirSync(join(fixtureRoot, "public"), { recursive: true });
+  writeFileSync(
+    join(fixtureRoot, "index.html"),
+    `<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="/src/style.css">
+    <link rel="icon" href="/icon.svg">
+  </head>
+  <body>
+    <div id="app">Worker fixture</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>`,
+  );
+  writeFileSync(
+    join(fixtureRoot, "src", "main.js"),
+    `const worker = new Worker(new URL("./worker.js", import.meta.url), {
+  type: "module",
+});
+worker.postMessage("ping");`,
+  );
+  writeFileSync(
+    join(fixtureRoot, "src", "worker.js"),
+    `self.onmessage = ({ data }) => self.postMessage(data);`,
+  );
+  writeFileSync(join(fixtureRoot, "src", "style.css"), "body { color: navy; }");
+  writeFileSync(
+    join(fixtureRoot, "public", "icon.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><circle cx=".5" cy=".5" r=".5"/></svg>',
+  );
+  writeFileSync(
+    join(fixtureRoot, "vite.config.mjs"),
+    `export default {
+  base: "/__mockup/",
+  build: { outDir: "dist" },
+};`,
+  );
+}
+
+function runVite(args, cwd) {
+  const result = spawnSync(viteCli, args, { cwd, encoding: "utf8" });
+  assert.equal(
+    result.status,
+    0,
+    `Vite ${args[0]} failed:\n${result.stdout}\n${result.stderr}`,
+  );
+}
+
+function startVitePreview(fixtureRoot, port) {
+  const child = spawn(
+    viteCli,
+    [
+      "preview",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--strictPort",
+    ],
+    {
+      cwd: fixtureRoot,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const output = [];
+  child.stdout.on("data", (chunk) => output.push(chunk.toString()));
+  child.stderr.on("data", (chunk) => output.push(chunk.toString()));
+  return { child, output };
+}
+
+async function waitForVitePreview(server, pageUrl) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (server.child.exitCode !== null) {
+      throw new Error(`Vite preview exited early:\n${server.output.join("")}`);
+    }
+    try {
+      const response = await fetch(pageUrl);
+      await response.body?.cancel();
+      if (response.ok) return;
+    } catch {
+      // Vite preview has not started listening yet.
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+  throw new Error(
+    `Vite preview did not start at ${pageUrl}:\n${server.output.join("")}`,
+  );
+}
+
+async function stopVitePreview(server) {
+  if (server.child.exitCode !== null) return;
+  const exited = new Promise((resolveExit) => {
+    server.child.once("exit", resolveExit);
+  });
+  try {
+    process.kill(-server.child.pid, "SIGTERM");
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+  let timeout;
+  await Promise.race([
+    exited,
+    new Promise((resolveTimeout) => {
+      timeout = setTimeout(resolveTimeout, 3000);
+    }),
+  ]);
+  clearTimeout(timeout);
+  if (server.child.exitCode === null) {
+    try {
+      process.kill(-server.child.pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+    await exited;
+  }
+}
 
 function makeBuiltApp() {
   const outputDirectory = join(tempRoot, "dist");
@@ -699,5 +846,87 @@ new Worker(new URL(\`./workers/\${runtimeWorkerName}.js\`, import.meta.url));`,
       }),
       /does not resolve beneath configured preview path "\/__mockup\/"/,
     );
+  });
+});
+
+describe("worker URLs in Vite production output", () => {
+  const fixtureRoot = join(tempRoot, "vite-worker-fixture");
+  let app;
+  let baseUrl;
+  let previewServer;
+
+  before(async () => {
+    writeViteWorkerFixture(fixtureRoot);
+    runVite(["build", "--config", "vite.config.mjs"], fixtureRoot);
+    const port = await getAvailablePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    app = {
+      name: "Vite Worker Fixture",
+      indexPath: "dist/index.html",
+      basePath: "/__mockup",
+    };
+    previewServer = startVitePreview(fixtureRoot, port);
+    await waitForVitePreview(previewServer, `${baseUrl}/__mockup/`);
+  });
+
+  after(async () => {
+    if (previewServer) await stopVitePreview(previewServer);
+  });
+
+  it("requests and serves the worker emitted by a real production build", async () => {
+    const workerRequests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      const response = await fetch(url);
+      if (/worker[^/]*\.js$/i.test(url.pathname)) {
+        workerRequests.push({
+          pathname: url.pathname,
+          contentType: response.headers.get("content-type"),
+          body: await response.clone().text(),
+        });
+      }
+      return response;
+    };
+
+    await checkServedAssets(app, {
+      cwd: fixtureRoot,
+      baseUrl,
+      basePath: app.basePath,
+      fetchImpl,
+      log: () => {},
+    });
+
+    assert.equal(workerRequests.length, 1);
+    assert.match(workerRequests[0].pathname, /^\/__mockup\/.*worker.*\.js$/i);
+    assert.match(workerRequests[0].contentType, /javascript/i);
+    assert.match(workerRequests[0].body, /postMessage/);
+  });
+
+  it("reports a failed response for the worker emitted by Vite", async () => {
+    const workerRequests = [];
+    const fetchImpl = async (input) => {
+      const url = new URL(input);
+      if (/worker[^/]*\.js$/i.test(url.pathname)) {
+        workerRequests.push(url.pathname);
+        return new Response("missing worker", {
+          status: 404,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      return fetch(url);
+    };
+
+    await assert.rejects(
+      checkServedAssets(app, {
+        cwd: fixtureRoot,
+        baseUrl,
+        basePath: app.basePath,
+        fetchImpl,
+        log: () => {},
+      }),
+      /Vite Worker Fixture web worker request .* returned HTTP 404/,
+    );
+    assert.equal(workerRequests.length, 1);
+    assert.match(workerRequests[0], /^\/__mockup\/.*worker.*\.js$/i);
   });
 });
