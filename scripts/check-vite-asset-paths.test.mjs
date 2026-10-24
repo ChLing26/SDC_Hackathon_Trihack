@@ -888,6 +888,26 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("does not let comment-like slashes in regular expressions hide later assets", () => {
+    const { app, outputDirectory } = createApp({
+      html: '<script src="/preview/assets/app.js"></script>',
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    writeFileSync(
+      join(assetsDirectory, "app.js"),
+      `const slashPattern = /[//]/;
+      const escapedSlashPattern = /https?:\\/\\//;
+      if (enabled) /[//]/.test("comment-like slashes");
+      import("/preview/assets/missing-after-regex.js");`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      /missing-after-regex\.js.*assets\/app\.js/,
+    );
+  });
+
   it("preserves JavaScript template strings and strips comments inside their expressions", () => {
     const { app, outputDirectory } = createApp({
       html: '<script src="/preview/assets/app.js"></script>',

@@ -940,13 +940,59 @@ function stripCssComments(css) {
 function stripJavaScriptComments(source) {
   const result = source.split("");
   const contexts = [{ type: "code", templateExpression: false, braceDepth: 0 }];
+  const expressionPrefixKeywords = new Set([
+    "await",
+    "case",
+    "delete",
+    "do",
+    "else",
+    "in",
+    "instanceof",
+    "new",
+    "of",
+    "return",
+    "throw",
+    "typeof",
+    "void",
+    "yield",
+  ]);
+  const controlStatementKeywords = new Set([
+    "catch",
+    "for",
+    "if",
+    "switch",
+    "while",
+    "with",
+  ]);
   const maskComment = (start, end) => {
     for (let index = start; index < end; index += 1) {
       if (source[index] !== "\n" && source[index] !== "\r") result[index] = " ";
     }
   };
+  const skipRegularExpression = (start) => {
+    let inCharacterClass = false;
+    for (let cursor = start + 1; cursor < source.length; cursor += 1) {
+      const character = source[cursor];
+      if (character === "\n" || character === "\r") return start + 1;
+      if (character === "\\") {
+        cursor += 1;
+      } else if (character === "[") {
+        inCharacterClass = true;
+      } else if (character === "]") {
+        inCharacterClass = false;
+      } else if (character === "/" && !inCharacterClass) {
+        cursor += 1;
+        while (/[a-z]/i.test(source[cursor] ?? "")) cursor += 1;
+        return cursor;
+      }
+    }
+    return start + 1;
+  };
 
   let index = 0;
+  let canStartRegularExpression = true;
+  let pendingControlParen = false;
+  const parenContexts = [];
   while (index < source.length) {
     const context = contexts.at(-1);
     const character = source[index];
@@ -957,6 +1003,7 @@ function stripJavaScriptComments(source) {
         index += 2;
       } else if (character === "`") {
         contexts.pop();
+        canStartRegularExpression = false;
         index += 1;
       } else if (character === "$" && nextCharacter === "{") {
         contexts.push({
@@ -964,6 +1011,7 @@ function stripJavaScriptComments(source) {
           templateExpression: true,
           braceDepth: 0,
         });
+        canStartRegularExpression = true;
         index += 2;
       } else {
         index += 1;
@@ -984,11 +1032,15 @@ function stripJavaScriptComments(source) {
           index += 1;
         }
       }
+      canStartRegularExpression = false;
+      pendingControlParen = false;
       continue;
     }
 
     if (character === "`") {
       contexts.push({ type: "template" });
+      canStartRegularExpression = false;
+      pendingControlParen = false;
       index += 1;
       continue;
     }
@@ -1021,16 +1073,76 @@ function stripJavaScriptComments(source) {
       continue;
     }
 
+    if (character === "/" && canStartRegularExpression) {
+      const expressionEnd = skipRegularExpression(index);
+      if (expressionEnd > index + 1) {
+        maskComment(index, expressionEnd);
+        index = expressionEnd;
+        canStartRegularExpression = false;
+        pendingControlParen = false;
+        continue;
+      }
+    }
+
+    if (/[a-z_$]/i.test(character) || character.charCodeAt(0) > 0x7f) {
+      const start = index;
+      index += 1;
+      while (index < source.length && /[\w$]/.test(source[index])) index += 1;
+      const identifier = source.slice(start, index);
+      canStartRegularExpression = expressionPrefixKeywords.has(identifier);
+      pendingControlParen = controlStatementKeywords.has(identifier);
+      continue;
+    }
+
+    if (/\d/.test(character)) {
+      index += 1;
+      while (index < source.length && /[\w.]/.test(source[index])) index += 1;
+      canStartRegularExpression = false;
+      pendingControlParen = false;
+      continue;
+    }
+
     if (context.templateExpression) {
       if (character === "{") {
         context.braceDepth += 1;
       } else if (character === "}") {
         if (context.braceDepth === 0) {
           contexts.pop();
+          canStartRegularExpression = false;
         } else {
           context.braceDepth -= 1;
         }
       }
+    }
+
+    if (character === "(") {
+      parenContexts.push(pendingControlParen);
+      pendingControlParen = false;
+      canStartRegularExpression = true;
+    } else if (character === ")") {
+      canStartRegularExpression = parenContexts.pop() ?? false;
+      pendingControlParen = false;
+    } else if (character === "]" || character === "}") {
+      canStartRegularExpression = false;
+      pendingControlParen = false;
+    } else if (character === ".") {
+      if (source.slice(index, index + 3) === "...") {
+        canStartRegularExpression = true;
+        pendingControlParen = false;
+        index += 3;
+        continue;
+      }
+      canStartRegularExpression = false;
+      pendingControlParen = false;
+    } else if (/[({[,:;?=+\-*%&|^~<>!]/.test(character)) {
+      canStartRegularExpression = true;
+      pendingControlParen = false;
+    } else if (character === "/") {
+      canStartRegularExpression = true;
+      pendingControlParen = false;
+      if (nextCharacter === "=") index += 1;
+    } else if (!/\s/.test(character)) {
+      pendingControlParen = false;
     }
     index += 1;
   }
