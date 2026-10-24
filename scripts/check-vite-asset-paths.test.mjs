@@ -326,6 +326,78 @@ describe("Vite preview asset paths", () => {
     );
   });
 
+  it("checks quoted local image-set candidates in inline CSS and ignores external, data, and unrelated strings", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background-image: image-set('/preview/assets/inline-1x.webp' 1x, 'https://cdn.example.test/inline-2x.webp' 2x, 'data:image/webp;base64,AAAA' 3x)"></div>
+<style>
+.hero { background-image: -webkit-image-set("/preview/assets/block-1x.avif" 1x, "data:image/avif;base64,AAAA" 2x); }
+.caption::after { content: "image-set('/preview/assets/unrelated.webp' 2x)"; }
+</style>`,
+    });
+    const assetsDirectory = join(outputDirectory, "assets");
+    mkdirSync(assetsDirectory, { recursive: true });
+    for (const file of ["app.js", "inline-1x.webp", "block-1x.avif"]) {
+      writeFileSync(join(assetsDirectory, file), "");
+    }
+
+    assert.doesNotThrow(() =>
+      checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+    );
+  });
+
+  it("reports missing image-set candidates in inline CSS with their HTML source lines", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<div style="background-image: image-set('/preview/assets/missing-inline-1x.webp' 1x, '/preview/assets/missing-inline-2x.webp' 2x)"></div>
+<style>
+.hero { background-image: image-set("/preview/assets/missing-block.avif" 2x); }
+</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-inline-1x\.webp" in index\.html:2/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-inline-2x\.webp" in index\.html:2/,
+        );
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-block\.avif" in index\.html:4/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("reports incorrect preview prefixes in image-set candidates with their HTML source line", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<style>.hero { background-image: image-set("/assets/wrong-prefix.webp" 2x); }</style>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(error.message, /configured base path "\/preview\/"/);
+        assert.match(
+          error.message,
+          /"\/assets\/wrong-prefix\.webp" in index\.html:2/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("checks local assets in unquoted HTML style attributes", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>

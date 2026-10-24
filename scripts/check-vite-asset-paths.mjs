@@ -42,6 +42,8 @@ const cssAssetExtensionPattern = new RegExp(
   String.raw`\.(?:${assetExtensions})(?:[?#]|$)`,
   "i",
 );
+const cssImageExtensionPattern =
+  /\.(?:png|jpe?g|gif|svg|webp|avif|ico)(?:[?#]|$)/i;
 const cssImportReferencePattern =
   /@import\s+(?!url\s*\()\s*["']((?:\/|\.\.?\/)?[^"'\x60\s()<>;,]+?\.css(?:[?#][^"'\x60\s()<>;,]*)?)["']/gi;
 const htmlCharacterReferences = JSON.parse(
@@ -1272,6 +1274,26 @@ function collectInlineStyleReferences(html, sourcePrefix, resolveFrom) {
       references.push(resolveFrom ? { ...reference, resolveFrom } : reference);
     }
 
+    for (const match of collectCssImageSetStringReferences(
+      commentStrippedStyle,
+    )) {
+      const referenceUrl = decodeCssEscapes(match.url);
+      if (
+        !cssImageExtensionPattern.test(referenceUrl) ||
+        /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(referenceUrl)
+      ) {
+        continue;
+      }
+      references.push({
+        url: match.url,
+        resolvedUrl: referenceUrl,
+        source: sourcePrefix
+          ? `${sourcePrefix}:${lineNumberAt(html, sourceOffsetAt(match.index))}`
+          : `index.html:${lineNumberAt(html, sourceOffsetAt(match.index))}`,
+        ...(resolveFrom ? { resolveFrom } : {}),
+      });
+    }
+
     for (const match of commentStrippedStyle.matchAll(
       cssImportReferencePattern,
     )) {
@@ -1297,6 +1319,113 @@ function collectInlineStyleReferences(html, sourcePrefix, resolveFrom) {
   for (const match of html.matchAll(styleBlockPattern)) {
     const styleOffset = match.index + match[0].indexOf(match[1]);
     addStyleReferences(match[1], styleOffset);
+  }
+
+  return references;
+}
+
+function collectCssImageSetStringReferences(css) {
+  const references = [];
+
+  function readStringEnd(start) {
+    const quote = css[start];
+    for (let index = start + 1; index < css.length; index += 1) {
+      if (css[index] === "\\") {
+        index += 1;
+      } else if (css[index] === quote) {
+        return index + 1;
+      }
+    }
+    return -1;
+  }
+
+  function collectCandidate(start, end) {
+    while (start < end && /\s/.test(css[start])) start += 1;
+    if (css[start] !== "'" && css[start] !== '"') return;
+
+    const stringEnd = readStringEnd(start);
+    if (stringEnd === -1 || stringEnd > end) return;
+    references.push({
+      url: css.slice(start + 1, stringEnd - 1),
+      index: start + 1,
+    });
+  }
+
+  function findFunctionEnd(openingParenthesis) {
+    let depth = 0;
+    let quote = "";
+
+    for (let index = openingParenthesis; index < css.length; index += 1) {
+      const character = css[index];
+      if (quote) {
+        if (character === "\\") {
+          index += 1;
+        } else if (character === quote) {
+          quote = "";
+        }
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quote = character;
+      } else if (character === "(") {
+        depth += 1;
+      } else if (character === ")" && --depth === 0) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  for (let index = 0; index < css.length; ) {
+    if (css[index] === "'" || css[index] === '"') {
+      const stringEnd = readStringEnd(index);
+      index = stringEnd === -1 ? css.length : stringEnd;
+      continue;
+    }
+
+    const functionMatch = css
+      .slice(index)
+      .match(/^(?:-webkit-)?image-set\s*\(/i);
+    if (!functionMatch) {
+      index += 1;
+      continue;
+    }
+
+    const openingParenthesis = index + functionMatch[0].lastIndexOf("(");
+    const closingParenthesis = findFunctionEnd(openingParenthesis);
+    if (closingParenthesis === -1) {
+      index = openingParenthesis + 1;
+      continue;
+    }
+
+    let candidateStart = openingParenthesis + 1;
+    let depth = 0;
+    let quote = "";
+    for (
+      let cursor = candidateStart;
+      cursor < closingParenthesis;
+      cursor += 1
+    ) {
+      const character = css[cursor];
+      if (quote) {
+        if (character === "\\") {
+          cursor += 1;
+        } else if (character === quote) {
+          quote = "";
+        }
+      } else if (character === "'" || character === '"') {
+        quote = character;
+      } else if (character === "(") {
+        depth += 1;
+      } else if (character === ")") {
+        depth -= 1;
+      } else if (character === "," && depth === 0) {
+        collectCandidate(candidateStart, cursor);
+        candidateStart = cursor + 1;
+      }
+    }
+    collectCandidate(candidateStart, closingParenthesis);
+    index = closingParenthesis + 1;
   }
 
   return references;
