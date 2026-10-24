@@ -50,3 +50,4 @@ packages = ["libxcrypt"]
 [userenv.development]
 PIP_TARGET = "/home/runner/workspace/.pythonlibs/lib/python3.12/site-packages"
 PIP_USER = "false"
+GEMINI_MODEL = "gemini-3.8-flash"
