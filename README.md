@@ -24,7 +24,7 @@
 | GitHub Repository | https://github.com/ChLing26/SDC_Hackathon_Trihack/tree/main |
 | Live Demo         | https://tri-hack-sdc-hackaton.replit.app                    |
 | Slide Deck        | https://xmueducn-my.sharepoint.com/:p:/g/personal/ege2509040_xmu_edu_my/IQBANk0oL7rsT7IEZ72MeEJ8AZAPgTKJqajYZKEhRfbcYec?e=LomVP0 |
-| Demo Video        | [https://example.com/demo-video ](https://www.youtube.com/watch?v=Uea3Mrek-Cg)|
+| Demo Video        | https://www.youtube.com/watch?v=Uea3Mrek-Cg                 |
 
 ---
 
