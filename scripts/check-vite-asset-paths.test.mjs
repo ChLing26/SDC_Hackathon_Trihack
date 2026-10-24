@@ -910,6 +910,42 @@ frame.setAttribute("srcdoc", '<img src="/assets/wrong-generated-prefix.webp"><im
     );
   });
 
+  it("checks extensionless iframe pages only when the emitted file is HTML", () => {
+    const { app, outputDirectory } = createApp({
+      html: `<script src="/preview/assets/app.js"></script>
+<iframe src="/preview/frames/embedded"></iframe>
+<iframe src="/preview/products/item"></iframe>
+<iframe src="/preview/frames/not-a-document"></iframe>`,
+    });
+    mkdirSync(join(outputDirectory, "assets"), { recursive: true });
+    mkdirSync(join(outputDirectory, "frames"), { recursive: true });
+    writeFileSync(join(outputDirectory, "assets", "app.js"), "");
+    writeFileSync(
+      join(outputDirectory, "frames", "embedded"),
+      `<!doctype html>
+<html><body><img src="/preview/assets/missing-from-extensionless-frame.webp"></body></html>`,
+    );
+    writeFileSync(
+      join(outputDirectory, "frames", "not-a-document"),
+      `This is a data file with an apparent <img src="/preview/assets/not-an-image.webp"> reference.`,
+    );
+
+    assert.throws(
+      () => checkAssetPaths(app, { cwd: tempRoot, log: () => {} }),
+      (error) => {
+        assert.match(
+          error.message,
+          /"\/preview\/assets\/missing-from-extensionless-frame\.webp" in iframe page frames\/embedded \(http:\/\/preview\.local\/preview\/frames\/embedded\):2 img\[src\]/,
+        );
+        assert.doesNotMatch(
+          error.message,
+          /products\/item|not-a-document|not-an-image/,
+        );
+        return true;
+      },
+    );
+  });
+
   it("reports incorrect preview prefixes in iframe pages", () => {
     const { app, outputDirectory } = createApp({
       html: `<script src="/preview/assets/app.js"></script>

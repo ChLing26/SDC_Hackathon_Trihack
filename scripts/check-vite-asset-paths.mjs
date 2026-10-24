@@ -1237,14 +1237,15 @@ function collectIframePageReferences(
         continue;
       }
       if (pageURL.origin !== "http://preview.local") continue;
-      const isHTMLPage =
+      const hasHTMLPagePath =
         /\.html?$/i.test(pageURL.pathname) || pageURL.pathname.endsWith("/");
-      if (!isHTMLPage) continue;
+      const isExtensionlessPage =
+        !pageURL.pathname.endsWith("/") && !/\.[^/]+$/.test(pageURL.pathname);
+      if (!hasHTMLPagePath && !isExtensionlessPage) continue;
 
-      const source =
-        `${document.source}:${lineNumberAt(document.html, tagStart)} iframe[src]`;
+      const source = `${document.source}:${lineNumberAt(document.html, tagStart)} iframe[src]`;
       const reference = { url, source, resolveFrom: documentBaseURL.href };
-      references.push(reference);
+      if (hasHTMLPagePath) references.push(reference);
 
       if (!pageURL.pathname.startsWith(basePath)) continue;
 
@@ -1287,12 +1288,23 @@ function collectIframePageReferences(
         continue;
       }
 
+      let pageHTML;
+      try {
+        pageHTML = readFileSync(pagePath, "utf8");
+      } catch {
+        continue;
+      }
+      if (isExtensionlessPage && !looksLikeHTMLDocument(pageHTML)) continue;
+      if (isExtensionlessPage) references.push(reference);
+
       const documentKey = resolve(pagePath);
       if (visitedDocuments.has(documentKey)) continue;
       visitedDocuments.add(documentKey);
       pendingDocuments.push({
-        html: readFileSync(pagePath, "utf8"),
-        source: `iframe page ${relativePagePath.split(sep).join("/")}`,
+        html: pageHTML,
+        source: `iframe page ${relativePagePath.split(sep).join("/")}${
+          isExtensionlessPage ? ` (${pageURL.href})` : ""
+        }`,
         url: pageURL,
         includeReferences: true,
       });
@@ -1300,6 +1312,13 @@ function collectIframePageReferences(
   }
 
   return references;
+}
+
+function looksLikeHTMLDocument(content) {
+  const beginning = content.replace(/^\uFEFF/, "").trimStart();
+  return /^(?:(?:<!--[\s\S]*?-->)\s*)*(?:<!doctype\s+html\b|<html\b)/i.test(
+    beginning,
+  );
 }
 
 function isMediaResourceAttribute(element, attribute, tagAttributes) {
